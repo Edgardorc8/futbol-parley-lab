@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+cache/
+reportes/
+entrada/
+*.db
+*.db-wal
+*.db-shm
+.venv/

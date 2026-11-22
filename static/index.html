@@ -1,0 +1,419 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>Fútbol Parley Lab — Élite Europea</title>
+  <style>
+    :root { --bg:#0f172a; --card:#1e293b; --txt:#e2e8f0; --mut:#94a3b8; --ok:#10b981; --warn:#f59e0b; --bad:#ef4444; --acc:#38bdf8; }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family:Segoe UI,system-ui,sans-serif; background:var(--bg); color:var(--txt); }
+    header { display:flex; gap:10px; align-items:center; padding:14px 22px; background:#1b365d; flex-wrap:wrap; }
+    header h1 { font-size:18px; margin:0 10px 0 0; }
+    button, input { background:#0b2545; color:var(--txt); border:1px solid #335; border-radius:8px; padding:7px 12px; font-size:13px; }
+    button { cursor:pointer; }
+    button:hover { border-color:var(--acc); }
+    nav button.on, .pill.on { background:var(--acc); color:#000; font-weight:700; border-color:var(--acc); }
+    main { padding:18px 22px; max-width:1400px; margin:0 auto; }
+    .mut { color:var(--mut); font-size:12px; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(410px,1fr)); gap:14px; }
+    .grid3 { display:grid; grid-template-columns:repeat(auto-fit,minmax(410px,1fr)); gap:14px; margin-top:16px; }
+    .card { background:var(--card); border-radius:12px; padding:15px; border-left:5px solid var(--ok); overflow-x:auto; }
+    .card.hero { border-left:5px solid var(--acc); background:linear-gradient(135deg,#1e293b,#172554); margin-bottom:16px; }
+    .card.w { border-left-color:var(--warn); }
+    .card.b { border-left-color:var(--bad); }
+    h2, h3 { margin:0 0 8px; display:flex; justify-content:space-between; align-items:center; gap:8px; }
+    table { width:100%; border-collapse:collapse; font-size:12.5px; margin-top:8px; }
+    th, td { padding:7px 8px; border-bottom:1px solid #334155; text-align:left; }
+    th { color:var(--mut); font-weight:600; }
+    .tag { padding:2px 7px; border-radius:6px; font-size:11px; font-weight:700; display:inline-block; }
+    .ok { background:#065f46; color:#a7f3d0; }
+    .warn { background:#78350f; color:#fde68a; }
+    .bad { background:#7f1d1d; color:#fecaca; }
+    .pos { color:#34d399; font-weight:700; }
+    .neg { color:#f87171; font-weight:700; }
+    .hide { display:none; }
+    .logo { width:22px; height:22px; object-fit:contain; vertical-align:middle; }
+    .match { display:inline-flex; align-items:center; gap:6px; }
+    .liga-hdr { display:flex; align-items:center; gap:10px; margin:20px 0 10px; padding:8px 14px; background:#172554; border-radius:10px; border-left:4px solid var(--acc); }
+    .liga-hdr h2 { margin:0; font-size:15px; }
+    .pills { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:14px; }
+    .kpi { display:flex; gap:18px; flex-wrap:wrap; margin-top:10px; }
+    .kpi > div { display:flex; flex-direction:column; gap:2px; }
+    .kpi b { font-size:16px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>⚽ Fútbol Parley Lab</h1>
+    <input type="date" id="fecha" onchange="cargar(false)">
+    <button onclick="irManana()">📅 Mañana</button>
+    <button onclick="cargar(true)">⟳ Actualizar</button>
+    <button onclick="descargarExcel()">⬇ Excel</button>
+    <nav style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap">
+      <button id="t-res" class="on" onclick="tab('res')">🎯 Qué Apostar</button>
+      <button id="t-rk" onclick="tab('rk')">🏆 Ranking Completo</button>
+      <button id="t-par" onclick="tab('par')">📋 Partidos por Liga</button>
+      <button id="t-pr" onclick="tab('pr')">⛹️ Player Props</button>
+      <button id="t-tk" onclick="tab('tk')">🎟️ Mi Parley</button>
+      <button id="t-his" onclick="tab('his')">📊 Historial & ROI</button>
+    </nav>
+    <span id="upd" class="mut"></span>
+  </header>
+  <main>
+    <div id="loading" class="mut">Cargando jornada europea...</div>
+    <section id="v-res"></section>
+    <section id="v-rk" class="hide"></section>
+    <section id="v-par" class="hide"></section>
+    <section id="v-pr" class="hide"></section>
+    <section id="v-tk" class="hide"></section>
+    <section id="v-his" class="hide"></section>
+  </main>
+  <script>
+    let DATA = null, LIGA_FILTRO = "TODAS", RK_FILTRO = "TODOS", PR_FILTRO = "TODOS", PICKS = new Set();
+    const $ = id => document.getElementById(id);
+    const pct = v => v == null ? "—" : (v * 100).toFixed(1) + "%";
+    const bloq = e => e.includes("BLOQUEADO") || e.includes("CUARENTENA");
+    const cls = e => e.startsWith("LUZ") ? "ok" : (e.startsWith("AVISO") ? "warn" : "bad");
+    const jugado = g => /full time|final|ft|halftime|in progress/i.test(g.estado || "");
+    const LIGA_ICON = {
+      "eng.1": "🏴󠁧󠁢󠁥󠁮󠁧󠁿", "esp.1": "🇪🇸", "ita.1": "🇮🇹", "ger.1": "🇩🇪",
+      "fra.1": "🇫🇷", "uefa.champions": "🏆", "uefa.europa": "🟠"
+    };
+    const mLogo = g => `<span class="match">
+      ${g.home.logo ? `<img class="logo" src="${g.home.logo}" alt="${g.home.abbr}">` : ""}<b>${g.home.nombre}</b>
+      <span class="mut">vs</span>
+      ${g.away.logo ? `<img class="logo" src="${g.away.logo}" alt="${g.away.abbr}">` : ""}<b>${g.away.nombre}</b>
+    </span>`;
+
+    function irManana() {
+      const d = new Date(Date.now() - 4 * 3600e3 + 86400e3).toISOString().slice(0, 10);
+      $("fecha").value = d;
+      cargar(false);
+    }
+
+    function tab(t) {
+      ["res", "rk", "par", "pr", "tk", "his"].forEach(k => {
+        $("v-" + k).classList.toggle("hide", k !== t);
+        $("t-" + k).classList.toggle("on", k === t);
+      });
+      if (t === "his") cargarHistorial(false);
+      if (t === "tk") renderParley();
+    }
+
+    async function cargar(refrescar = false) {
+      $("loading").style.display = "block";
+      const f = $("fecha").value;
+      const url = `/api/jornada?refrescar=${refrescar}` + (f ? `&fecha=${f}` : "");
+      const r = await fetch(url);
+      DATA = await r.json();
+      $("fecha").value = DATA.fecha;
+      $("upd").textContent = `Actualizado ${DATA.actualizado} VET · ${DATA.partidos.length} partidos`;
+      $("loading").style.display = "none";
+      renderResumen();
+      renderRanking();
+      renderPartidos();
+      renderProps();
+      renderParley();
+    }
+
+    function renderResumen() {
+      if (!DATA.partidos.length) {
+        $("v-res").innerHTML = `<div class="card w"><h3>Sin partidos en las 7 ligas europeas para ${DATA.fecha}</h3><p class="mut">Haz clic en <b>📅 Mañana</b> o selecciona otra fecha.</p></div>`;
+        return;
+      }
+      const mapG = Object.fromEntries(DATA.partidos.map(a => [a.g.partido, a.g]));
+      const top = DATA.top_parley || [];
+      let cuotaComb = 1, probComb = 1;
+      top.forEach(x => { cuotaComb *= x.cuota; probComb *= x.prob; });
+      const rowsTop = top.map((x, i) => {
+        const g = mapG[x.partido];
+        const ico = g ? (LIGA_ICON[g.liga] || "⚽") : "⚽";
+        return `<tr>
+          <td><b>${i + 1}</b></td><td>${x.hora}</td><td>${ico} ${x.liga}</td>
+          <td>${g ? mLogo(g) : `<b>${x.partido}</b>`}</td>
+          <td>${x.mercado}</td><td><b>${x.seleccion}</b></td>
+          <td>${x.cuota.toFixed(2)}</td><td class="pos">${pct(x.prob)}</td>
+          <td><span class="tag ${cls(x.estado)}">${x.estado.split(":")[0]}</span></td>
+        </tr>`;
+      }).join("");
+
+      // Top 4 por categoría (solo partidos aún por jugar)
+      const prox = DATA.partidos.filter(a => !jugado(a.g));
+      const todas = prox.flatMap(a => a.sel.filter(s => !bloq(s.estado)).map(s => ({ a, s })));
+      todas.sort((x, y) => y.s.prob - x.s.prob);
+      const topCat = (tipo, titulo, ico) => {
+        const list = todas.filter(x => x.s.tipo === tipo).slice(0, 4);
+        return `<div class="card"><h3>${ico} ${titulo}</h3>${list.length ? `<table>
+          <tr><th>#</th><th>Partido</th><th>Selección</th><th>Cuota</th><th>Prob.</th></tr>
+          ${list.map((x, i) => `<tr><td><b>${i + 1}</b></td><td>${mLogo(x.a.g)}<div class="mut">${x.a.g.liga_nombre} · ${x.a.g.hora}</div></td>
+            <td><b>${x.s.seleccion}</b></td><td>${x.s.cuota.toFixed(2)}</td><td class="pos">${pct(x.s.prob)}</td></tr>`).join("")}
+        </table>` : '<p class="mut">Sin partidos próximos en esta categoría. Prueba <b>📅 Mañana</b>.</p>'}</div>`;
+      };
+
+      $("v-res").innerHTML = `
+        <div class="card hero">
+          <h2>🎯 Combinado Corto de Élite (Solo partidos por jugar · Máx. 4 Patas) <span class="tag ok">${top.length} patas</span></h2>
+          ${top.length ? `<table>
+            <thead><tr><th>#</th><th>Hora VET</th><th>Liga</th><th>Partido</th><th>Mercado</th><th>Apostar</th><th>Cuota</th><th>Prob. Real</th><th>Estado</th></tr></thead>
+            <tbody>${rowsTop}</tbody>
+          </table>
+          <div class="kpi">
+            <div><span class="mut">Cuota combinada</span><b>${cuotaComb.toFixed(2)}</b></div>
+            <div><span class="mut">Prob. conjunta real</span><b class="pos">${pct(probComb)}</b></div>
+            <div><span class="mut">Exigencia cuota</span><b>${pct(1 / cuotaComb)}</b></div>
+          </div>` : `<p class="mut">Los partidos de ${DATA.fecha} ya finalizaron o están en juego. <button onclick="irManana()" style="margin-left:8px">📅 Ver partidos de Mañana</button></p>`}
+        </div>
+        <div class="grid3">
+          ${topCat("Doble Oportunidad", "Top Doble Oportunidad (1X / X2)", "🛡️")}
+          ${topCat("Total OVER 2.5", "Top Over 2.5 Goles", "🔥")}
+          ${topCat("Total UNDER 2.5", "Top Under 2.5 Goles", "🧊")}
+          ${topCat("Total UNDER 3.5", "Top Under 3.5 Goles (Protegido)", "🔽")}
+          ${topCat("Total OVER 1.5", "Top Over 1.5 Goles (Protegido)", "🔼")}
+          ${topCat("Ambos Marcan", "Top Ambos Marcan (BTTS)", "⚡")}
+          ${topCat("Hándicap +1.5", "Top Hándicap Protegido (+1.5)", "⚖️")}
+        </div>`;
+    }
+
+    function renderRanking() {
+      const prox = DATA.partidos.filter(a => !jugado(a.g));
+      const todas = prox.flatMap(a => a.sel.map(s => ({ a, s, id: a.g.id + "|" + s.tipo })));
+      todas.sort((x, y) => (bloq(x.s.estado) - bloq(y.s.estado)) || (y.s.prob - x.s.prob));
+      const tipos = ["TODOS", "Doble Oportunidad", "Ganador (2 Goles)", "Total OVER 2.5", "Total UNDER 2.5", "Total OVER 1.5", "Total UNDER 3.5", "Ambos Marcan", "Hándicap +1.5"];
+      const lista = RK_FILTRO === "TODOS" ? todas : todas.filter(x => x.s.tipo === RK_FILTRO);
+      $("v-rk").innerHTML = `
+        <div class="pills">${tipos.map(t => `<button class="pill ${RK_FILTRO === t ? 'on' : ''}" onclick="RK_FILTRO='${t}';renderRanking()">${t}</button>`).join("")}</div>
+        <div class="card">
+          <h3>🏆 Ranking Completo — Partidos por jugar (${lista.length} selecciones)</h3>
+          <table>
+            <thead><tr><th>Ticket</th><th>Hora</th><th>Liga</th><th>Partido</th><th>Mercado</th><th>Selección</th><th>Cuota</th><th>Prob.</th><th>Estado</th></tr></thead>
+            <tbody>${lista.map(x => `<tr>
+              <td><input type="checkbox" ${PICKS.has(x.id) ? "checked" : ""} onchange="PICKS.has('${x.id}')?PICKS.delete('${x.id}'):PICKS.add('${x.id}');renderParley()"></td>
+              <td>${x.a.g.hora}</td><td>${LIGA_ICON[x.a.g.liga] || "⚽"} ${x.a.g.liga_nombre}</td>
+              <td>${mLogo(x.a.g)}</td><td>${x.s.tipo}</td><td><b>${x.s.seleccion}</b></td>
+              <td>${x.s.cuota.toFixed(2)}</td><td class="pos">${pct(x.s.prob)}</td>
+              <td><span class="tag ${cls(x.s.estado)}">${x.s.estado.split(":")[0]}</span></td>
+            </tr>`).join("")}</tbody>
+          </table>
+        </div>`;
+    }
+
+    function renderPartidos() {
+      const ligas = [...new Map(DATA.partidos.map(a => [a.g.liga, a.g.liga_nombre])).entries()];
+      const pills = `<div class="pills">
+        <button class="pill ${LIGA_FILTRO === 'TODAS' ? 'on' : ''}" onclick="LIGA_FILTRO='TODAS';renderPartidos()">Todas (${DATA.partidos.length})</button>
+        ${ligas.map(([slug, nom]) => {
+          const cnt = DATA.partidos.filter(a => a.g.liga === slug).length;
+          return `<button class="pill ${LIGA_FILTRO === slug ? 'on' : ''}" onclick="LIGA_FILTRO='${slug}';renderPartidos()">${LIGA_ICON[slug] || '⚽'} ${nom} (${cnt})</button>`;
+        }).join("")}
+      </div>`;
+
+      const grupos = ligas.filter(([slug]) => LIGA_FILTRO === "TODAS" || LIGA_FILTRO === slug);
+      const htmlGrupos = grupos.map(([slug, nom]) => {
+        const lista = DATA.partidos.filter(a => a.g.liga === slug);
+        const cards = lista.map(a => {
+          const g = a.g, p = a.proy, fin = jugado(g);
+          const rows = a.sel.map(s => `
+            <tr>
+              <td>${s.tipo}</td><td><b>${s.seleccion}</b></td>
+              <td class="mut">${pct(s.p1)} / ${pct(s.p2)}</td><td class="pos">${pct(s.prob)}</td>
+              <td>${s.cuota.toFixed(2)}${s.cuota_est ? "*" : ""}</td>
+              <td><span class="tag ${cls(s.estado)}">${s.estado.split(":")[0]}</span></td>
+            </tr>`).join("");
+          return `<div class="card ${fin ? 'w' : ''}">
+            <h3>${mLogo(g)}<span class="tag ${fin ? 'warn' : 'ok'}">${fin ? g.estado : g.hora}</span></h3>
+            <div class="mut">Goles esperados (65/35): <b>${p.cal_h} - ${p.cal_a} (Total ${p.total})</b> · Línea: <b>${g.dk.total}</b> ${p.fat_h || p.fat_a ? "· ⚠️ Fatiga ≤72h" : ""}</div>
+            <table>
+              <thead><tr><th>Mercado</th><th>Selección</th><th>Esc.1 / Esc.2</th><th>Prob.</th><th>Cuota</th><th>Estado</th></tr></thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>`;
+        }).join("");
+        return `<div class="liga-hdr"><h2>${LIGA_ICON[slug] || '⚽'} ${nom}</h2><span class="mut">${lista.length} partidos</span></div><div class="grid">${cards}</div>`;
+      }).join("");
+
+      $("v-par").innerHTML = pills + (htmlGrupos || '<p class="mut">Sin partidos.</p>');
+    }
+
+    function renderProps() {
+      const prox = DATA.partidos.filter(a => !jugado(a.g));
+      const all = prox.flatMap(a => a.props || []);
+      all.sort((x, y) => y.prob - x.prob);
+      const cats = [
+        ["TODOS", "Todos"],
+        ["PORTEROS", "🧤 Porteros (Atajadas)"],
+        ["A PUERTA", "🎯 Remates a Puerta"],
+        ["REMATES", "⚡ Remates Totales"],
+      ];
+      const pills = `<div class="pills">${cats.map(([k, lbl]) => `<button class="pill ${PR_FILTRO === k ? 'on' : ''}" onclick="PR_FILTRO='${k}';renderProps()">${lbl}</button>`).join("")}</div>`;
+
+      const sec = (catKey, titulo) => {
+        const sub = all.filter(p => p.cat === catKey).slice(0, 25);
+        return `<div class="card" style="margin-bottom:14px">
+          <h3>${titulo} <span class="mut">Binomial Negativa (NB2) · ${sub.length} jugadores</span></h3>
+          <table>
+            <thead><tr><th>#</th><th>Liga</th><th>Jugador</th><th>Equipo</th><th>Partido</th><th>Prop</th><th>Promedio</th><th>Prob. Real</th><th>Filtro</th></tr></thead>
+            <tbody>${sub.map((p, i) => `<tr>
+              <td><b>${i + 1}</b></td>
+              <td>${LIGA_ICON[p.liga_slug] || "⚽"} ${p.liga}</td>
+              <td><b>${p.jugador}</b></td>
+              <td>${p.logo ? `<img class="logo" src="${p.logo}"> ` : ""}${p.equipo}</td>
+              <td>${p.partido} <span class="mut">(${p.hora})</span></td>
+              <td><b>${p.prop}</b></td>
+              <td class="mut">${p.promedio}</td>
+              <td class="pos">${pct(p.prob)}</td>
+              <td><span class="tag ${p.fatiga ? 'warn' : 'ok'}">${p.filtro}</span></td>
+            </tr>`).join("") || '<tr><td colspan="9" class="mut">Sin jugadores próximos en esta categoría. Prueba <b>📅 Mañana</b>.</td></tr>'}</tbody>
+          </table>
+        </div>`;
+      };
+
+      const bloques = PR_FILTRO === "TODOS"
+        ? sec("PORTEROS", "🧤 Porteros — Atajadas Protegidas (r=3.0)") +
+          sec("A PUERTA", "🎯 Remates a Puerta — SoT (r=4.5)") +
+          sec("REMATES", "⚡ Remates Totales (r=4.0)")
+        : sec(PR_FILTRO, cats.find(c => c[0] === PR_FILTRO)[1]);
+
+      $("v-pr").innerHTML = pills + bloques;
+    }
+
+    function renderParley() {
+      if (!DATA) return;
+      const todas = DATA.partidos.flatMap(a => a.sel.map(s => ({ a, s, id: a.g.id + "|" + s.tipo })));
+      const sel = todas.filter(x => PICKS.has(x.id));
+      const cuota = sel.reduce((c, x) => c * x.s.cuota, 1);
+      const prob = sel.reduce((p, x) => p * x.s.prob, 1);
+      const bk = parseFloat(localStorage.getItem("fut_bankroll") || "100");
+      const ev = prob * cuota - 1;
+      const kellyQ = ev > 0 ? Math.min(0.05, (ev / (cuota - 1)) * 0.25) : 0;
+      const stake = bk * kellyQ;
+
+      $("v-tk").innerHTML = `
+        <div class="card hero">
+          <h2>🎟️ Mi Parley Personalizado (${sel.length} patas) <button onclick="PICKS.clear();renderRanking();renderParley()">🗑️ Limpiar</button></h2>
+          ${sel.length ? `<table>
+            <tr><th>Partido</th><th>Mercado</th><th>Selección</th><th>Cuota</th><th>Prob.</th><th></th></tr>
+            ${sel.map(x => `<tr><td>${mLogo(x.a.g)}</td><td>${x.s.tipo}</td><td><b>${x.s.seleccion}</b></td><td>${x.s.cuota.toFixed(2)}</td><td class="pos">${pct(x.s.prob)}</td><td><button onclick="PICKS.delete('${x.id}');renderRanking();renderParley()">✕</button></td></tr>`).join("")}
+          </table>
+          <div class="kpi">
+            <div><span class="mut">Cuota total</span><b>${cuota.toFixed(2)}</b></div>
+            <div><span class="mut">Prob. conjunta</span><b class="pos">${pct(prob)}</b></div>
+            <div><span class="mut">Ventaja (+EV)</span><b class="${ev > 0 ? 'pos' : 'neg'}">${(ev * 100).toFixed(1)}%</b></div>
+            <div><span class="mut">Stake ¼ Kelly</span><b class="${kellyQ > 0 ? 'pos' : 'neg'}">${kellyQ > 0 ? '$' + stake.toFixed(2) : '$0.00 (NO BET)'}</b></div>
+          </div>` : '<p class="mut">Marca selecciones en <b>🏆 Ranking Completo</b> para armar tu ticket y calcular el stake ¼ Kelly.</p>'}
+          <div style="margin-top:12px"><label class="mut">Bankroll ($): <input type="number" value="${bk}" style="width:90px" onchange="localStorage.setItem('fut_bankroll',this.value);renderParley()"></label></div>
+        </div>`;
+    }
+
+    let HIST = null, CAL_Y = new Date().getFullYear(), CAL_M = new Date().getMonth(), CAL_SEL = "", HIS_MKT = "TODOS", HIS_LIGA = "TODAS";
+    async function cargarHistorial(verif) {
+      const r = await fetch(`/api/historial?verificar=${verif}`);
+      HIST = await r.json();
+      pintarHistorial();
+    }
+
+    function pintarHistorial() {
+      const h = HIST;
+      if (!h) return;
+      const pf = h.por_fecha || {};
+      const meses = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
+      const first = new Date(CAL_Y, CAL_M, 1);
+      const startDay = (first.getDay() + 6) % 7;
+      const daysInMonth = new Date(CAL_Y, CAL_M + 1, 0).getDate();
+      let cells = "";
+      for (let i = 0; i < startDay; i++) cells += "<div></div>";
+      for (let d = 1; d <= daysInMonth; d++) {
+        const iso = `${CAL_Y}-${String(CAL_M + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+        const info = pf[iso];
+        const sel = CAL_SEL === iso;
+        const bg = !info ? "#0b2545" : (info.beneficio_u > 0 ? "#064e3b" : info.beneficio_u < 0 ? "#7f1d1d" : "#1e3a5f");
+        const brd = sel ? "2px solid var(--acc)" : "1px solid #335";
+        cells += `<div onclick="CAL_SEL=(CAL_SEL==='${iso}'?'':'${iso}');pintarHistorial()"
+          style="cursor:pointer;background:${bg};border:${brd};border-radius:8px;padding:6px;min-height:52px;font-size:11.5px">
+          <div style="display:flex;justify-content:space-between"><b>${d}</b>${info ? `<span class="mut">${info.ganadas}G/${info.perdidas}P</span>` : ""}</div>
+          ${info ? `<div style="margin-top:4px;font-weight:700;color:${info.beneficio_u >= 0 ? '#6ee7b7' : '#fca5a5'}">${info.beneficio_u >= 0 ? '+' : ''}${info.beneficio_u}u${info.pendientes ? ` <span class="mut">(${info.pendientes}p)</span>` : ""}</div>` : ""}
+        </div>`;
+      }
+      let lista = CAL_SEL ? (h.picks || []).filter(x => x.fecha === CAL_SEL) : (h.picks || []);
+      const ligasH = ["TODAS", ...new Set(lista.map(x => x.liga))];
+      if (HIS_LIGA !== "TODAS") lista = lista.filter(x => x.liga === HIS_LIGA);
+      const mkts = ["TODOS", ...new Set(lista.map(x => x.mercado))];
+      if (HIS_MKT !== "TODOS") lista = lista.filter(x => x.mercado === HIS_MKT);
+
+      // Agrupar por partido (fecha + liga + partido) en tarjetas contraídas por defecto
+      const gruposMap = new Map();
+      lista.forEach(x => {
+        const key = `${x.fecha}|${x.liga}|${x.partido}`;
+        if (!gruposMap.has(key)) gruposMap.set(key, { fecha: x.fecha, liga: x.liga, partido: x.partido, marcador: x.marcador || "—", items: [] });
+        gruposMap.get(key).items.push(x);
+      });
+      const bloquesPartidos = [...gruposMap.values()].map(gr => {
+        const gCnt = gr.items.filter(i => i.resultado === "GANADA").length;
+        const pCnt = gr.items.filter(i => i.resultado === "PERDIDA").length;
+        return `<details class="card" style="margin-bottom:8px;padding:11px">
+          <summary style="cursor:pointer;display:flex;justify-content:space-between;align-items:center;font-weight:700">
+            <span>${LIGA_ICON[gr.liga] || "⚽"} ${gr.partido} <span class="mut" style="margin-left:8px">${gr.fecha} · Marcador: <b>${gr.marcador}</b></span></span>
+            <span><span class="tag ok">${gCnt}G</span> <span class="tag bad">${pCnt}P</span></span>
+          </summary>
+          <table style="margin-top:8px">
+            <thead><tr><th>Mercado</th><th>Selección</th><th>Cuota</th><th>Prob. Modelo</th><th>Resultado</th></tr></thead>
+            <tbody>${gr.items.map(x => `<tr>
+              <td>${x.mercado}</td><td><b>${x.seleccion}</b></td><td>${x.cuota.toFixed(2)}</td><td>${pct(x.prob_real)}</td>
+              <td><span class="tag ${x.resultado === 'GANADA' ? 'ok' : (x.resultado === 'PERDIDA' ? 'bad' : 'warn')}">${x.resultado}</span></td>
+            </tr>`).join("")}</tbody>
+          </table>
+        </details>`;
+      }).join("");
+      $("v-his").innerHTML = `
+        <div class="card hero">
+          <h2>📊 Historial & Backtesting Automático <button onclick="cargarHistorial(true)">⟳ Verificar resultados en ESPN</button></h2>
+          <div class="kpi">
+            <div><span class="mut">Total</span><b>${h.total}</b></div>
+            <div><span class="mut">G / P / Pend.</span><b>${h.ganadas} / ${h.perdidas} / ${h.pendientes}</b></div>
+            <div><span class="mut">% Acierto</span><b class="pos">${pct(h.acierto)}</b></div>
+            <div><span class="mut">ROI</span><b class="${(h.roi || 0) >= 0 ? 'pos' : 'neg'}">${pct(h.roi)}</b></div>
+            <div><span class="mut">Beneficio</span><b>${h.beneficio_u >= 0 ? '+' : ''}${h.beneficio_u} u</b></div>
+            <div><span class="mut">Brier Score</span><b>${h.brier != null ? h.brier.toFixed(3) : '—'}</b></div>
+            <div><span class="mut">Log-Loss</span><b>${h.log_loss != null ? h.log_loss.toFixed(3) : '—'}</b></div>
+          </div>
+        </div>
+        ${(h.calibracion || []).length ? `<div class="card" style="margin-bottom:14px">
+          <h3>📐 Curva de Calibración por Tramo de Probabilidad</h3>
+          <table><thead><tr><th>Tramo</th><th>Muestra (N)</th><th>Prob. Modelo</th><th>% Acierto Real</th></tr></thead>
+          <tbody>${h.calibracion.map(c => `<tr><td><b>${c.tramo}</b></td><td>${c.n}</td><td>${pct(c.esperada)}</td><td class="pos">${pct(c.acierto)}</td></tr>`).join("")}</tbody></table>
+        </div>` : ''}
+        ${(h.por_mercado || []).length ? `<div class="card" style="margin-bottom:14px">
+          <h3>🔬 Diagnóstico del Modelo por Mercado</h3>
+          <table><thead><tr><th>Mercado</th><th>G/P/Pend</th><th>Prob. Modelo</th><th>% Real</th><th>Sesgo</th><th>ROI</th></tr></thead>
+          <tbody>${h.por_mercado.map(m => `<tr><td><b>${m.mercado}</b></td><td>${m.ganadas}/${m.perdidas}/${m.pendientes}</td>
+            <td>${m.prob_esperada != null ? pct(m.prob_esperada) : '—'}</td><td><b>${m.acierto != null ? pct(m.acierto) : '—'}</b></td>
+            <td class="${(m.sesgo || 0) >= 0 ? 'pos' : 'neg'}">${m.sesgo != null ? (m.sesgo >= 0 ? '+' : '') + (m.sesgo * 100).toFixed(1) + '%' : '—'}</td>
+            <td class="${(m.roi || 0) >= 0 ? 'pos' : 'neg'}">${m.roi != null ? (m.roi * 100).toFixed(1) + '%' : '—'}</td></tr>`).join('')}</tbody></table>
+        </div>` : ''}
+        <div class="card" style="margin-bottom:14px">
+          <h3>
+            <span>📅 Calendario — ${meses[CAL_M]} ${CAL_Y} ${CAL_SEL ? `<span class="tag ok" style="margin-left:8px">${CAL_SEL}</span>` : ""}</span>
+            <span style="display:flex;gap:6px">
+              ${CAL_SEL ? `<button onclick="CAL_SEL='';pintarHistorial()">Ver todos</button>` : ""}
+              <button onclick="CAL_M--;if(CAL_M<0){CAL_M=11;CAL_Y--;}pintarHistorial()">◀</button>
+              <button onclick="CAL_M++;if(CAL_M>11){CAL_M=0;CAL_Y++;}pintarHistorial()">▶</button>
+            </span>
+          </h3>
+          <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;text-align:center;margin-bottom:6px" class="mut">
+            <div>Lun</div><div>Mar</div><div>Mié</div><div>Jue</div><div>Vie</div><div>Sáb</div><div>Dom</div>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px">${cells}</div>
+        </div>
+        <div class="pills">${ligasH.map(l => `<button class="pill ${HIS_LIGA === l ? 'on' : ''}" onclick="HIS_LIGA='${l}';pintarHistorial()">${l === 'TODAS' ? 'Todas las Ligas' : (LIGA_ICON[l] || '⚽') + ' ' + l}</button>`).join("")}</div>
+        <div class="pills">${mkts.map(m => `<button class="pill ${HIS_MKT === m ? 'on' : ''}" onclick="HIS_MKT='${m}';pintarHistorial()">${m}</button>`).join("")}</div>
+        ${bloquesPartidos || '<div class="card"><p class="mut">Sin registros para este filtro.</p></div>'}`;
+    }
+
+    function descargarExcel() {
+      const f = $("fecha").value;
+      window.location = "/api/excel" + (f ? `?fecha=${f}` : "");
+    }
+
+    cargar(false);
+  </script>
+</body>
+</html>
