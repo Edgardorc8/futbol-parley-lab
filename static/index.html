@@ -53,7 +53,7 @@
       <button id="t-res" class="on" onclick="tab('res')">🎯 Qué Apostar</button>
       <button id="t-rk" onclick="tab('rk')">🏆 Ranking Completo</button>
       <button id="t-par" onclick="tab('par')">📋 Partidos por Liga</button>
-      <button id="t-pr" onclick="tab('pr')">⛹️ Player Props</button>
+      <button id="t-pr" onclick="tab('pr')">👟 Player Props</button>
       <button id="t-tk" onclick="tab('tk')">🎟️ Mi Parley</button>
       <button id="t-his" onclick="tab('his')">📊 Historial & ROI</button>
     </nav>
@@ -74,11 +74,27 @@
     const pct = v => v == null ? "—" : (v * 100).toFixed(1) + "%";
     const bloq = e => e.includes("BLOQUEADO") || e.includes("CUARENTENA");
     const cls = e => e.startsWith("LUZ") ? "ok" : (e.startsWith("AVISO") ? "warn" : "bad");
-    const jugado = g => /full time|final|ft|halftime|first half|second half|in progress|extra time|penalties/i.test(g.estado || "") || (g.inicio_iso && new Date(g.inicio_iso) <= new Date());
-    const LIGA_ICON = {
-      "eng.1": "🏴󠁧󠁢󠁥󠁮󠁧󠁿", "esp.1": "🇪🇸", "ita.1": "🇮🇹", "ger.1": "🇩🇪",
-      "fra.1": "🇫🇷", "uefa.champions": "🏆", "uefa.europa": "🟠"
+    function yaPasoHora(g) {
+      if (g.inicio_iso) return new Date(g.inicio_iso) <= new Date();
+      if (!DATA?.fecha || !g.hora) return false;
+      const m = g.hora.match(/(\d+):(\d+)\s*(AM|PM)/i);
+      if (!m) return false;
+      let h = parseInt(m[1], 10);
+      const min = parseInt(m[2], 10), pm = m[3].toUpperCase() === "PM";
+      if (pm && h !== 12) h += 12;
+      if (!pm && h === 12) h = 0;
+      const dtVet = new Date(`${DATA.fecha}T${String(h).padStart(2, "0")}:${String(min).padStart(2, "0")}:00-04:00`);
+      return dtVet <= new Date();
+    }
+    const jugado = g => /full time|final|ft|halftime|first half|second half|in progress|extra time|penalties/i.test(g.estado || "") || yaPasoHora(g);
+    const LIGA_LOGO_ID = {
+      "eng.1": 23, "esp.1": 15, "ita.1": 12, "ger.1": 10,
+      "fra.1": 9, "uefa.champions": 2, "uefa.europa": 2310
     };
+    const ligaIco = slug => LIGA_LOGO_ID[slug]
+      ? `<img class="logo" src="https://a.espncdn.com/i/leaguelogos/soccer/500-dark/${LIGA_LOGO_ID[slug]}.png" alt="${slug}">`
+      : "⚽";
+    const LIGA_ICON = new Proxy({}, { get: (_, k) => ligaIco(k) });
     const mLogo = g => `<span class="match">
       ${g.home.logo ? `<img class="logo" src="${g.home.logo}" alt="${g.home.abbr}">` : ""}<b>${g.home.nombre}</b>
       <span class="mut">vs</span>
