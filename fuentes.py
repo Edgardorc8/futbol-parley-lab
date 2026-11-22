@@ -75,6 +75,7 @@ def partidos(fecha):
                 liga=slug,
                 liga_nombre=nombre_liga,
                 hora=hora.strftime("%I:%M %p"),
+                inicio_iso=e["date"],
                 partido=f"{teams['home']['team'].get('abbreviation', '?')} vs {teams['away']['team'].get('abbreviation', '?')}",
                 estado=c["status"]["type"]["description"],
             )

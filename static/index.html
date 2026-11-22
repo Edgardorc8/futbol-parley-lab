@@ -74,7 +74,7 @@
     const pct = v => v == null ? "—" : (v * 100).toFixed(1) + "%";
     const bloq = e => e.includes("BLOQUEADO") || e.includes("CUARENTENA");
     const cls = e => e.startsWith("LUZ") ? "ok" : (e.startsWith("AVISO") ? "warn" : "bad");
-    const jugado = g => /full time|final|ft|halftime|in progress/i.test(g.estado || "");
+    const jugado = g => /full time|final|ft|halftime|first half|second half|in progress|extra time|penalties/i.test(g.estado || "") || (g.inicio_iso && new Date(g.inicio_iso) <= new Date());
     const LIGA_ICON = {
       "eng.1": "🏴󠁧󠁢󠁥󠁮󠁧󠁿", "esp.1": "🇪🇸", "ita.1": "🇮🇹", "ger.1": "🇩🇪",
       "fra.1": "🇫🇷", "uefa.champions": "🏆", "uefa.europa": "🟠"
@@ -122,7 +122,7 @@
         return;
       }
       const mapG = Object.fromEntries(DATA.partidos.map(a => [a.g.partido, a.g]));
-      const top = DATA.top_parley || [];
+      const top = (DATA.top_parley || []).filter(x => !mapG[x.partido] || !jugado(mapG[x.partido]));
       let cuotaComb = 1, probComb = 1;
       top.forEach(x => { cuotaComb *= x.cuota; probComb *= x.prob; });
       const rowsTop = top.map((x, i) => {
@@ -279,7 +279,7 @@
     function renderParley() {
       if (!DATA) return;
       const todas = DATA.partidos.flatMap(a => a.sel.map(s => ({ a, s, id: a.g.id + "|" + s.tipo })));
-      const sel = todas.filter(x => PICKS.has(x.id));
+      const sel = todas.filter(x => PICKS.has(x.id) && !jugado(x.a.g));
       const cuota = sel.reduce((c, x) => c * x.s.cuota, 1);
       const prob = sel.reduce((p, x) => p * x.s.prob, 1);
       const bk = parseFloat(localStorage.getItem("fut_bankroll") || "100");
@@ -291,8 +291,8 @@
         <div class="card hero">
           <h2>🎟️ Mi Parley Personalizado (${sel.length} patas) <button onclick="PICKS.clear();renderRanking();renderParley()">🗑️ Limpiar</button></h2>
           ${sel.length ? `<table>
-            <tr><th>Partido</th><th>Mercado</th><th>Selección</th><th>Cuota</th><th>Prob.</th><th></th></tr>
-            ${sel.map(x => `<tr><td>${mLogo(x.a.g)}</td><td>${x.s.tipo}</td><td><b>${x.s.seleccion}</b></td><td>${x.s.cuota.toFixed(2)}</td><td class="pos">${pct(x.s.prob)}</td><td><button onclick="PICKS.delete('${x.id}');renderRanking();renderParley()">✕</button></td></tr>`).join("")}
+            <tr><th>Hora VET</th><th>Partido</th><th>Mercado</th><th>Selección</th><th>Cuota</th><th>Prob.</th><th></th></tr>
+            ${sel.map(x => `<tr><td>${x.a.g.hora}</td><td>${mLogo(x.a.g)}</td><td>${x.s.tipo}</td><td><b>${x.s.seleccion}</b></td><td>${x.s.cuota.toFixed(2)}</td><td class="pos">${pct(x.s.prob)}</td><td><button onclick="PICKS.delete('${x.id}');renderRanking();renderParley()">✕</button></td></tr>`).join("")}
           </table>
           <div class="kpi">
             <div><span class="mut">Cuota total</span><b>${cuota.toFixed(2)}</b></div>

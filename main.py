@@ -105,11 +105,20 @@ def analizar(fecha, log=print):
             p1=p1, p2=p2, casa=cc,
         ))
 
-    # Top Parley corto de élite (máx. 4 patas, 1 por partido, SOLO partidos aún por jugar)
+    # Top Parley corto de élite (máx. 4 patas, 1 por partido, SOLO partidos aún por jugar por estado y hora)
+    ahora_utc = dt.datetime.now(dt.timezone.utc)
     eleg = []
     for a in analisis:
         est_g = (a["g"].get("estado") or "").lower()
-        if any(k in est_g for k in ("full time", "final", "ft", "halftime", "in progress")):
+        ini_iso = a["g"].get("inicio_iso")
+        ya_empezo = any(k in est_g for k in ("full time", "final", "ft", "halftime", "first half", "second half", "in progress", "extra time", "penalties"))
+        if not ya_empezo and ini_iso:
+            try:
+                if dt.datetime.fromisoformat(ini_iso.replace("Z", "+00:00")) <= ahora_utc:
+                    ya_empezo = True
+            except Exception:
+                pass
+        if ya_empezo:
             continue
         for s in a["sel"]:
             if not M.bloqueado(s["estado"]):
