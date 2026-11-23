@@ -278,20 +278,22 @@ def evaluar_partido(g, proy, cc, n_muestra=10):
             estado=estado_sel("over", linea, cuota_o, est_o, disc=alerta_tot, ventaja=ev_o, edge_pp=prob_o - pm_o),
         ))
 
-    # 4. Ambos Marcan (BTTS Sí / No) — con shrinkage jerárquico y EV real
+    # 4. Ambos Marcan (BTTS Sí / No) — usa cuota real de The Odds API / CSV si existe
     btts_si = p1["p_btts"] >= 0.50
     pb1 = p1["p_btts"] if btts_si else (1.0 - p1["p_btts"])
     pb2 = p2["p_btts"] if btts_si else (1.0 - p2["p_btts"])
     pm_btts = pm["p_btts"] if btts_si else (1.0 - pm["p_btts"])
     prob_btts = _shrink(min(pb1, pb2), pm_btts)
-    cuota_btts = round(max(1.20, 1 / min(0.86, max(0.20, pm_btts) * vig_m)), 2)
+    k_btts = "btts_si" if btts_si else "btts_no"
+    cuota_btts = cc.get(k_btts) or round(max(1.20, 1 / min(0.86, max(0.20, pm_btts) * vig_m)), 2)
+    est_btts = k_btts not in cc
     ev_btts = _ev(prob_btts, cuota_btts)
     sel.append(dict(
         tipo="Ambos Marcan", seleccion="Ambos Marcan — SÍ" if btts_si else "Ambos Marcan — NO",
-        p1=pb1, p2=pb2, prob=prob_btts, prob_novig=round(pm_btts, 4), cuota=cuota_btts, cuota_est=True,
+        p1=pb1, p2=pb2, prob=prob_btts, prob_novig=round(pm_btts, 4), cuota=cuota_btts, cuota_est=est_btts,
         implicita=1 / cuota_btts, edge_pp=round(prob_btts - pm_btts, 4),
         ventaja=ev_btts, ev_ajustado=round(ev_btts * w_mod, 4), w_mod=w_mod,
-        estado=estado_sel("btts", linea, cuota_btts, True, ventaja=ev_btts, edge_pp=prob_btts - pm_btts),
+        estado=estado_sel("btts", linea, cuota_btts, est_btts, ventaja=ev_btts, edge_pp=prob_btts - pm_btts),
     ))
 
     # 5. Hándicap Protegido (+1.5 al underdog) — con shrinkage y EV real

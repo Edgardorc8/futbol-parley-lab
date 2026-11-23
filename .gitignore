@@ -8,3 +8,5 @@ entrada/
 *.db-shm
 .venv/
 backups/
+.env
+alias_equipos.json

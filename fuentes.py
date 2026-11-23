@@ -1,8 +1,11 @@
 """Fuentes gratuitas: ESPN Soccer API (7 ligas europeas de élite: partidos, tablas, L5 y cuotas)."""
 import datetime as dt
+import difflib
 import json
+import os
 import re
 import time
+import unicodedata
 import urllib.request
 from pathlib import Path
 
@@ -206,4 +209,194 @@ def plantilla(slug, team_id):
                 sv_pg=round(sv / pj, 2),
                 goles=int(st.get("totalGoals", 0)),
             ))
+    return out
+
+
+# ---------------- The Odds API v4 (Cuotas Reales) ----------------
+ODDS_SPORT_KEY = {
+    "eng.1": "soccer_epl",
+    "esp.1": "soccer_spain_la_liga",
+    "ita.1": "soccer_italy_serie_a",
+    "ger.1": "soccer_germany_bundesliga",
+    "fra.1": "soccer_france_ligue_one",
+    "uefa.champions": "soccer_uefa_champs_league",
+    "uefa.europa": "soccer_uefa_europa_league",
+}
+ODDS_TTL = 6 * 3600  # 6 horas para cuidar los 500 créditos/mes
+ALIAS_FILE = Path(__file__).parent / "alias_equipos.json"
+CREDITS_FILE = CACHE / "oddsapi_credits.json"
+
+
+def _odds_api_key():
+    k = os.environ.get("ODDS_API_KEY", "").strip()
+    if k:
+        return k
+    env_p = Path(__file__).parent / ".env"
+    if env_p.exists():
+        for ln in env_p.read_text(encoding="utf-8").splitlines():
+            if ln.strip().startswith("ODDS_API_KEY="):
+                return ln.split("=", 1)[1].strip().strip('"').strip("'")
+    return ""
+
+
+def normalizar_nombre(nombre):
+    s = unicodedata.normalize("NFKD", str(nombre or "")).encode("ascii", "ignore").decode("ascii").lower()
+    s = re.sub(r"\b(fc|cf|sc|ac|as|sv|afc|rb|rc|ud|cd|ssc|ogc|vfb|vfl|tsg|fsv)\b", " ", s)
+    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9 ]", " ", s)).strip()
+
+
+def _cargar_alias():
+    if ALIAS_FILE.exists():
+        try:
+            return json.loads(ALIAS_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+    return {}
+
+
+def _registrar_sin_match(espn_nom, candidatos):
+    al = _cargar_alias()
+    if espn_nom not in al:
+        al[espn_nom] = {"sugerencias": candidatos[:3], "mapear_a": ""}
+        try:
+            ALIAS_FILE.write_text(json.dumps(al, indent=2, ensure_ascii=False), encoding="utf-8")
+        except Exception:
+            pass
+
+
+def _creditos_ok():
+    if not CREDITS_FILE.exists():
+        return True
+    try:
+        d = json.loads(CREDITS_FILE.read_text(encoding="utf-8"))
+        if d.get("fecha") == str(dt.date.today()) and int(d.get("remaining", 999)) < 50:
+            return False
+    except Exception:
+        pass
+    return True
+
+
+def _http_odds(url, cache_name, ttl=ODDS_TTL):
+    key = CACHE / f"{cache_name}.json"
+    if key.exists() and time.time() - key.stat().st_mtime < ttl:
+        return json.loads(key.read_text(encoding="utf-8"))
+    if not _creditos_ok():
+        print("[The Odds API] Alerta: <50 créditos restantes hoy, usando caché/fallback.")
+        return json.loads(key.read_text(encoding="utf-8")) if key.exists() else []
+    try:
+        req = urllib.request.Request(url, headers=UA)
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            txt = resp.read().decode("utf-8")
+            rem = resp.headers.get("x-requests-remaining")
+            if rem is not None:
+                CREDITS_FILE.write_text(json.dumps({"fecha": str(dt.date.today()), "remaining": int(float(rem))}), encoding="utf-8")
+                if int(float(rem)) < 50:
+                    print(f"[The Odds API] ALERTA: quedan solo {rem} créditos este mes.")
+        key.write_text(txt, encoding="utf-8")
+        return json.loads(txt)
+    except Exception as e:
+        print(f"[The Odds API] Fallback por error: {e}")
+        return json.loads(key.read_text(encoding="utf-8")) if key.exists() else []
+
+
+def _mejor_bookmaker(bms):
+    for pref in ("pinnacle", "bet365", "betfair_ex_eu", "unibet_eu", "williamhill"):
+        for b in bms:
+            if b.get("key") == pref:
+                return b
+    return bms[0] if bms else None
+
+
+def _match_evento(g, eventos, alias):
+    h_espn = alias.get(g["home"]["nombre"], {}).get("mapear_a") or g["home"]["nombre"]
+    a_espn = alias.get(g["away"]["nombre"], {}).get("mapear_a") or g["away"]["nombre"]
+    nh, na = normalizar_nombre(h_espn), normalizar_nombre(a_espn)
+    best, best_sc = None, 0.0
+    for ev in eventos:
+        eh, ea = normalizar_nombre(ev.get("home_team")), normalizar_nombre(ev.get("away_team"))
+        sc = (difflib.SequenceMatcher(None, nh, eh).ratio() + difflib.SequenceMatcher(None, na, ea).ratio()) / 2
+        if sc > best_sc:
+            best, best_sc = ev, sc
+    if best_sc >= 0.78:
+        return best
+    if eventos:
+        _registrar_sin_match(g["home"]["nombre"], [ev.get("home_team") for ev in eventos[:5]])
+    return None
+
+
+def obtener_cuotas_reales(juegos):
+    """Obtiene cuotas reales (h2h, totals 2.5, DO derivada de h2h, y btts en próximos) desde The Odds API v4."""
+    api_key = _odds_api_key()
+    if not api_key or not juegos:
+        return {}
+    alias = _cargar_alias()
+    ligas = {g["liga"] for g in juegos if g["liga"] in ODDS_SPORT_KEY}
+    por_liga = {}
+    for slug in ligas:
+        sk = ODDS_SPORT_KEY[slug]
+        url = f"https://api.the-odds-api.com/v4/sports/{sk}/odds/?apiKey={api_key}&regions=eu&markets=h2h,totals&oddsFormat=decimal"
+        por_liga[slug] = _http_odds(url, f"oddsapi_{sk}")
+
+    ahora_utc = dt.datetime.now(dt.timezone.utc)
+    out = {}
+    for g in juegos:
+        slug = g["liga"]
+        evs = por_liga.get(slug) or []
+        ev = _match_evento(g, evs, alias)
+        if not ev:
+            continue
+        bm = _mejor_bookmaker(ev.get("bookmakers") or [])
+        if not bm:
+            continue
+        cuo = {}
+        for mkt in bm.get("markets", []):
+            k = mkt.get("key")
+            outs = mkt.get("outcomes", [])
+            if k == "h2h":
+                o1 = ox = o2 = None
+                for o in outs:
+                    nm = normalizar_nombre(o.get("name"))
+                    if nm == "draw":
+                        ox = float(o["price"])
+                    elif difflib.SequenceMatcher(None, nm, normalizar_nombre(ev.get("home_team"))).ratio() >= 0.80:
+                        o1 = float(o["price"])
+                    else:
+                        o2 = float(o["price"])
+                if o1: cuo["ml_local"] = round(o1, 3)
+                if ox: cuo["ml_empate"] = round(ox, 3)
+                if o2: cuo["ml_visita"] = round(o2, 3)
+                # Doble Oportunidad ejecutable derivada de h2h real: (O1*OX)/(O1+OX)
+                if o1 and ox: cuo["dc_1x"] = round((o1 * ox) / (o1 + ox), 2)
+                if o2 and ox: cuo["dc_x2"] = round((o2 * ox) / (o2 + ox), 2)
+            elif k == "totals":
+                for o in outs:
+                    pt = o.get("point")
+                    if pt == 2.5:
+                        if o.get("name", "").lower() == "over":
+                            cuo["over25"] = round(float(o["price"]), 2)
+                        elif o.get("name", "").lower() == "under":
+                            cuo["under25"] = round(float(o["price"]), 2)
+
+        # BTTS por evento solo para partidos aún por jugar (caché 6h)
+        ini_iso = g.get("inicio_iso")
+        es_futuro = True
+        if ini_iso:
+            try:
+                es_futuro = dt.datetime.fromisoformat(ini_iso.replace("Z", "+00:00")) > ahora_utc
+            except Exception:
+                pass
+        if es_futuro and ev.get("id") and _creditos_ok():
+            sk = ODDS_SPORT_KEY[slug]
+            u_ev = f"https://api.the-odds-api.com/v4/sports/{sk}/events/{ev['id']}/odds?apiKey={api_key}&regions=eu&markets=btts&oddsFormat=decimal"
+            ev_btts = _http_odds(u_ev, f"oddsapi_btts_{ev['id']}")
+            bm_b = _mejor_bookmaker((ev_btts.get("bookmakers") if isinstance(ev_btts, dict) else []) or [])
+            if bm_b:
+                for mkt in bm_b.get("markets", []):
+                    if mkt.get("key") == "btts":
+                        for o in mkt.get("outcomes", []):
+                            nm = o.get("name", "").lower()
+                            if nm == "yes": cuo["btts_si"] = round(float(o["price"]), 2)
+                            elif nm == "no": cuo["btts_no"] = round(float(o["price"]), 2)
+        if cuo:
+            out[g["partido"]] = cuo
     return out

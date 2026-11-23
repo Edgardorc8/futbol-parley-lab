@@ -54,6 +54,7 @@ def analizar(fecha, log=print):
     if not juegos:
         return dict(fecha=str(fecha), partidos=[], top_parley=[])
     casa = leer_cuotas(fecha, juegos)
+    reales_api = F.obtener_cuotas_reales(juegos)
     tablas = {}
 
     # Guardar/restaurar cuotas pre-partido para que ESPN no borre líneas al iniciar
@@ -117,7 +118,7 @@ def analizar(fecha, log=print):
         da, fat_a = M.dias_descanso(l5a, fecha)
 
         proy = M.proyectar(sh, sa, l5h, l5a, lg, fat_h=fat_h, fat_a=fat_a)
-        cc = casa.get(g["partido"], {})
+        cc = dict(reales_api.get(g["partido"], {}), **casa.get(g["partido"], {}))
         n_muestra = min(sh.get("pj", 4) or 4, sa.get("pj", 4) or 4)
         sel, p1, p2 = M.evaluar_partido(g, proy, cc, n_muestra=n_muestra)
         props = M.sugerir_props(g, proy, pl_h, pl_a, lg)
