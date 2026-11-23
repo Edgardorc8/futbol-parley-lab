@@ -157,15 +157,15 @@
         </tr>`;
       }).join("");
 
-      // Top 4 por categoría (solo partidos aún por jugar, con checkbox directo a Mi Parley)
+      // Top 4 por categoría (ordenado por ev_ajustado, checkbox bloqueado si cuota_est=true)
       const prox = DATA.partidos.filter(a => !jugado(a.g));
       const todas = prox.flatMap(a => a.sel.filter(s => !bloq(s.estado)).map(s => ({ a, s, id: a.g.id + "|" + s.tipo })));
-      todas.sort((x, y) => y.s.prob - x.s.prob);
+      todas.sort((x, y) => (y.s.ev_ajustado ?? y.s.ventaja) - (x.s.ev_ajustado ?? x.s.ventaja));
       const topCat = (tipo, titulo, ico) => {
         const list = todas.filter(x => x.s.tipo === tipo).slice(0, 4);
         return `<div class="card"><h3>${ico} ${titulo}</h3>${list.length ? `<table>
           <tr><th>✓</th><th>Partido</th><th>Selección</th><th>Cuota</th><th>Prob.</th></tr>
-          ${list.map(x => `<tr><td><input type="checkbox" ${PICKS.has(x.id) ? "checked" : ""} onchange="PICKS.has('${x.id}')?PICKS.delete('${x.id}'):PICKS.add('${x.id}');renderRanking();renderParley()"></td>
+          ${list.map(x => `<tr><td><input type="checkbox" ${x.s.cuota_est ? "disabled title='Cuota estimada: cargar cuota real en CSV'" : ""} ${PICKS.has(x.id) ? "checked" : ""} onchange="PICKS.has('${x.id}')?PICKS.delete('${x.id}'):PICKS.add('${x.id}');renderRanking();renderParley()"></td>
             <td>${mLogo(x.a.g)}<div class="mut">${x.a.g.liga_nombre} · ${x.a.g.hora}</div></td>
             <td><b>${x.s.seleccion}</b></td><td>${x.s.cuota.toFixed(2)}</td><td class="pos">${pct(x.s.prob)}</td></tr>`).join("")}
         </table>` : '<p class="mut">Sin partidos próximos en esta categoría. Prueba <b>📅 Mañana</b>.</p>'}</div>`;
@@ -208,7 +208,7 @@
           <table>
             <thead><tr><th>Ticket</th><th>Hora</th><th>Liga</th><th>Partido</th><th>Mercado</th><th>Selección</th><th>Cuota</th><th>Prob.</th><th>Estado</th></tr></thead>
             <tbody>${lista.map(x => `<tr>
-              <td><input type="checkbox" ${PICKS.has(x.id) ? "checked" : ""} onchange="PICKS.has('${x.id}')?PICKS.delete('${x.id}'):PICKS.add('${x.id}');renderParley()"></td>
+              <td><input type="checkbox" ${x.s.cuota_est ? "disabled title='Cuota estimada: cargar cuota real en CSV'" : ""} ${PICKS.has(x.id) ? "checked" : ""} onchange="PICKS.has('${x.id}')?PICKS.delete('${x.id}'):PICKS.add('${x.id}');renderParley()"></td>
               <td>${x.a.g.hora}</td><td>${LIGA_ICON[x.a.g.liga] || "⚽"} ${x.a.g.liga_nombre}</td>
               <td>${mLogo(x.a.g)}</td><td>${x.s.tipo}</td><td><b>${x.s.seleccion}</b></td>
               <td>${x.s.cuota.toFixed(2)}</td><td class="pos">${pct(x.s.prob)}</td>
