@@ -105,7 +105,8 @@ def analizar(fecha, log=print):
             p1=p1, p2=p2, casa=cc,
         ))
 
-    # Top Parley corto de élite (máx. 4 patas, 1 por partido, SOLO partidos aún por jugar por estado y hora)
+    # Top Parley corto de élite: priorizar mercados con ROI positivo real (Doble Oportunidad, Ganador 2G, Ambos Marcan, Over 1.5) y LUZ VERDE
+    MERCADOS_ELITE = {"Doble Oportunidad", "Ganador (2 Goles)", "Ambos Marcan", "Total OVER 1.5"}
     ahora_utc = dt.datetime.now(dt.timezone.utc)
     eleg = []
     for a in analisis:
@@ -121,13 +122,14 @@ def analizar(fecha, log=print):
         if ya_empezo:
             continue
         for s in a["sel"]:
-            if not M.bloqueado(s["estado"]) and s["prob"] >= 0.65 and s["ventaja"] > 0:
+            if not M.bloqueado(s["estado"]) and s["tipo"] in MERCADOS_ELITE and s["prob"] >= 0.65 and s["ventaja"] > 0:
                 eleg.append(dict(
+                    id=f"{a['g']['id']}|{s['tipo']}",
                     partido=a["g"]["partido"], liga=a["g"]["liga_nombre"], hora=a["g"]["hora"],
                     mercado=s["tipo"], seleccion=s["seleccion"], cuota=s["cuota"],
                     prob=s["prob"], ventaja=s["ventaja"], estado=s["estado"],
                 ))
-    eleg.sort(key=lambda x: -(x["ventaja"] * 0.5 + x["prob"] * 0.5))
+    eleg.sort(key=lambda x: (0 if x["estado"].startswith("LUZ") else 1, -(x["ventaja"] * 0.5 + x["prob"] * 0.5)))
     vistos, top = set(), []
     for x in eleg:
         if x["partido"] not in vistos:
