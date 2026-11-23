@@ -7,3 +7,4 @@ entrada/
 *.db-wal
 *.db-shm
 .venv/
+backups/

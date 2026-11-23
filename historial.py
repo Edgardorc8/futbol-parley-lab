@@ -1,6 +1,7 @@
 """Historial y Backtesting automático en SQLite para Fútbol Parley Lab."""
 import datetime as dt
 import math
+import shutil
 import sqlite3
 from pathlib import Path
 
@@ -8,6 +9,21 @@ import fuentes as F
 import motor as M
 
 DB = Path(__file__).parent / "historial.db"
+BACKUPS = Path(__file__).parent / "backups"
+MODEL_VERSION = "fut_v2_ev_nb2"
+
+
+def _backup_diario(fecha):
+    """Copia de seguridad automática diaria de historial.db (mantiene últimos 14 días)."""
+    if not DB.exists():
+        return
+    BACKUPS.mkdir(exist_ok=True)
+    dst = BACKUPS / f"historial_{fecha:%Y%m%d}.db"
+    if not dst.exists():
+        shutil.copy2(DB, dst)
+        viejos = sorted(BACKUPS.glob("historial_*.db"))[:-14]
+        for v in viejos:
+            v.unlink(missing_ok=True)
 
 
 def _conn():
@@ -20,29 +36,50 @@ def _conn():
         mercado TEXT, seleccion TEXT, cuota REAL, prob_real REAL,
         linea_alt REAL, home_nombre TEXT, away_nombre TEXT,
         estado TEXT, resultado TEXT DEFAULT 'PENDIENTE', marcador TEXT DEFAULT '',
+        model_version TEXT DEFAULT 'v1',
         UNIQUE(fecha, game_id, mercado)
     )""")
+    cols = {r[1] for r in c.execute("PRAGMA table_info(picks)").fetchall()}
+    if "model_version" not in cols:
+        c.execute("ALTER TABLE picks ADD COLUMN model_version TEXT DEFAULT 'v1'")
+    c.execute("""CREATE TABLE IF NOT EXISTS odds_snapshots (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        fecha TEXT, game_id TEXT, liga TEXT, partido TEXT, captured_at TEXT,
+        ml_home REAL, ml_draw REAL, ml_away REAL, total_line REAL
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_picks_fecha ON picks(fecha)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_odds_game ON odds_snapshots(game_id)")
     return c
 
 
 def registrar_jornada(fecha, partidos):
+    _backup_diario(fecha)
+    ahora = dt.datetime.now(F.VET).isoformat(timespec="seconds")
     with _conn() as c:
         for a in partidos:
             g = a["g"]
+            dk = g.get("dk") or {}
+            if dk.get("total") is not None:
+                c.execute("""INSERT INTO odds_snapshots
+                    (fecha, game_id, liga, partido, captured_at, ml_home, ml_draw, ml_away, total_line)
+                    VALUES (?,?,?,?,?,?,?,?,?)""",
+                    (str(fecha), g["id"], g["liga"], g["partido"], ahora,
+                     dk.get("ml_home"), dk.get("ml_draw"), dk.get("ml_away"), dk.get("total")))
             for s in a["sel"]:
                 if M.bloqueado(s["estado"]):
                     continue
                 c.execute("""INSERT INTO picks
                     (fecha, game_id, liga, partido, hora, mercado, seleccion, cuota, prob_real,
-                     linea_alt, home_nombre, away_nombre, estado)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                     linea_alt, home_nombre, away_nombre, estado, model_version)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                     ON CONFLICT(fecha, game_id, mercado) DO UPDATE SET
                       seleccion=excluded.seleccion, cuota=excluded.cuota,
-                      prob_real=excluded.prob_real, estado=excluded.estado
+                      prob_real=excluded.prob_real, estado=excluded.estado,
+                      model_version=excluded.model_version
                     WHERE resultado='PENDIENTE'""",
                     (str(fecha), g["id"], g["liga"], g["partido"], g["hora"], s["tipo"], s["seleccion"],
                      s["cuota"], s["prob"], s.get("linea_alt"), g["home"]["nombre"],
-                     g["away"]["nombre"], s["estado"]))
+                     g["away"]["nombre"], s["estado"], MODEL_VERSION))
 
 
 def verificar_resultados():
