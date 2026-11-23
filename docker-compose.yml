@@ -1,0 +1,15 @@
+services:
+  futbol-parley-lab:
+    build: .
+    container_name: futbol-parley-lab
+    ports:
+      - "8001:8001"
+    environment:
+      - TZ=America/Caracas
+    volumes:
+      - ./historial.db:/app/historial.db
+      - ./cache:/app/cache
+      - ./reportes:/app/reportes
+      - ./entrada:/app/entrada
+      - ./backups:/app/backups
+    restart: unless-stopped
