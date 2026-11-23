@@ -58,6 +58,7 @@
       <button id="t-pr" onclick="tab('pr')">👟 Player Props</button>
       <button id="t-tk" onclick="tab('tk')">🎟️ Mi Parley</button>
       <button id="t-his" onclick="tab('his')">📊 Historial & ROI</button>
+      <button id="t-cuo" onclick="tab('cuo')">⚙️ Cuotas Casa</button>
     </nav>
     <span id="upd" class="mut"></span>
   </header>
@@ -69,6 +70,7 @@
     <section id="v-pr" class="hide"></section>
     <section id="v-tk" class="hide"></section>
     <section id="v-his" class="hide"></section>
+    <section id="v-cuo" class="hide"></section>
   </main>
   <script>
     let DATA = null, LIGA_FILTRO = "TODAS", RK_FILTRO = "TODOS", PR_FILTRO = "TODOS", PICKS = new Set();
@@ -110,12 +112,13 @@
     }
 
     function tab(t) {
-      ["res", "rk", "par", "pr", "tk", "his"].forEach(k => {
+      ["res", "rk", "par", "pr", "tk", "his", "cuo"].forEach(k => {
         $("v-" + k).classList.toggle("hide", k !== t);
         $("t-" + k).classList.toggle("on", k === t);
       });
       if (t === "his") cargarHistorial(false);
       if (t === "tk") renderParley();
+      if (t === "cuo") cargarCuotas();
     }
 
     async function cargar(refrescar = false) {
@@ -415,11 +418,34 @@
       cargarTicketsGuardados();
     }
 
-    let HIST = null, CAL_Y = new Date().getFullYear(), CAL_M = new Date().getMonth(), CAL_SEL = "", HIS_MKT = "TODOS", HIS_LIGA = "TODAS";
+    let HIST = null, CAL_Y = new Date().getFullYear(), CAL_M = new Date().getMonth(), CAL_SEL = "", HIS_MKT = "TODOS", HIS_LIGA = "TODAS", SOLO_LIMPIOS = false;
     async function cargarHistorial(verif) {
-      const r = await fetch(`/api/historial?verificar=${verif}`);
+      const r = await fetch(`/api/historial?verificar=${verif}&solo_limpios=${SOLO_LIMPIOS}`);
       HIST = await r.json();
       pintarHistorial();
+    }
+
+    async function cargarCuotas() {
+      const c = await (await fetch("/api/cuotas?fecha=" + $("fecha").value)).json();
+      const campos = ["ml_local", "dc_1x", "dc_x2", "under35", "over15"];
+      const prox = (DATA?.partidos || []).filter(a => !jugado(a.g));
+      $("v-cuo").innerHTML = `<div class="card hero">
+        <h2>⚙️ Cargar Cuotas Reales de tu Casa (TriunfoBet / Pinnacle)</h2>
+        <p class="mut">Al guardar cuotas reales aquí, esos picks dejan de ser <code>cuota_est=True</code> y se habilitan para <b>🎯 Qué Apostar</b> y <b>🎟️ Mi Parley</b>.</p>
+        <table><thead><tr><th>Hora</th><th>Liga</th><th>Partido</th>${campos.map(k => `<th>${k}</th>`).join("")}</tr></thead>
+        <tbody>${prox.map(a => `<tr><td>${a.g.hora}</td><td>${a.g.liga_nombre}</td><td><b>${a.g.partido}</b></td>
+          ${campos.map(k => `<td><input data-p="${a.g.partido}" data-k="${k}" value="${(c[a.g.partido] || {})[k] ?? ''}" style="width:72px"></td>`).join("")}</tr>`).join("")}</tbody></table>
+        <p><button onclick="guardarCuotasCasa()" style="background:var(--ok);color:#000;font-weight:700">💾 Guardar Cuotas Reales y Recalcular</button></p>
+      </div>`;
+    }
+    async function guardarCuotasCasa() {
+      const datos = {};
+      document.querySelectorAll("#v-cuo input").forEach(i => {
+        datos[i.dataset.p] = datos[i.dataset.p] || {};
+        if (i.value.trim()) datos[i.dataset.p][i.dataset.k] = i.value.trim();
+      });
+      await fetch("/api/cuotas?fecha=" + $("fecha").value, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(datos) });
+      cargar(false);
     }
 
     function pintarHistorial() {
@@ -476,7 +502,12 @@
       }).join("");
       $("v-his").innerHTML = `
         <div class="card hero">
-          <h2>📊 Historial & Backtesting Automático <button onclick="cargarHistorial(true)">⟳ Verificar resultados en ESPN</button></h2>
+          <h2>📊 Historial & Backtesting Automático
+            <span style="display:flex;gap:6px">
+              <button class="${SOLO_LIMPIOS ? 'on' : ''}" onclick="SOLO_LIMPIOS=!SOLO_LIMPIOS;cargarHistorial(false)">${SOLO_LIMPIOS ? '✓ Solo Muestra Limpia' : 'Ver Solo Muestra Limpia'} (${h.muestra_limpia || 0}/100)</button>
+              <button onclick="cargarHistorial(true)">⟳ Verificar resultados en ESPN</button>
+            </span>
+          </h2>
           <div class="kpi">
             <div><span class="mut">Total</span><b>${h.total}</b></div>
             <div><span class="mut">G / P / Pend.</span><b>${h.ganadas} / ${h.perdidas} / ${h.pendientes}</b></div>
@@ -485,7 +516,7 @@
             <div><span class="mut">Beneficio</span><b>${h.beneficio_u >= 0 ? '+' : ''}${h.beneficio_u} u</b></div>
             <div><span class="mut">Max Drawdown</span><b class="neg">-${(h.max_dd_u || 0).toFixed(2)} u</b></div>
             <div><span class="mut">Brier Mod / Mkt</span><b>${h.brier != null ? h.brier.toFixed(3) : '—'} / ${h.brier_mercado != null ? h.brier_mercado.toFixed(3) : '—'}</b></div>
-            <div><span class="mut">Log-Loss</span><b>${h.log_loss != null ? h.log_loss.toFixed(3) : '—'}</b></div>
+            <div><span class="mut">Log-Loss / CLV</span><b>${h.log_loss != null ? h.log_loss.toFixed(3) : '—'} / ${h.clv_medio != null ? (h.clv_medio * 100).toFixed(2) + '%' : '—'}</b></div>
           </div>
         </div>
         ${(h.calibracion || []).length ? `<div class="card" style="margin-bottom:14px">

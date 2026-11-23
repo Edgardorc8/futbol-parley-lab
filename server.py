@@ -58,10 +58,10 @@ def post_cuotas(fecha: str = None, datos: dict = Body(...)):
 
 
 @app.get("/api/historial")
-def api_historial(verificar: bool = True):
+def api_historial(verificar: bool = True, solo_limpios: bool = False):
     if verificar:
         H.verificar_resultados()
-    return H.resumen()
+    return H.resumen(solo_limpios=solo_limpios)
 
 
 @app.get("/api/tickets")
@@ -98,8 +98,9 @@ def excel(fecha: str = None):
 
 
 def programador():
+    """Recalcula y captura cuotas de cierre cada 15 minutos."""
     while True:
-        time.sleep(1800)
+        time.sleep(900)
         try:
             _correr(_fecha(None))
         except Exception as e:

@@ -132,24 +132,29 @@ def registrar_jornada(fecha, partidos):
                     VALUES (?,?,?,?,?,?,?,?,?)""",
                     (str(fecha), g["id"], g["liga"], g["partido"], ahora,
                      dk.get("ml_home"), dk.get("ml_draw"), dk.get("ml_away"), dk.get("total")))
+            n_m = min((a.get("sh") or {}).get("pj", 4) or 4, (a.get("sa") or {}).get("pj", 4) or 4)
             for s in a["sel"]:
                 if M.bloqueado(s["estado"]):
                     continue
                 c.execute("""INSERT INTO picks
                     (fecha, game_id, liga, partido, hora, mercado, seleccion, cuota, prob_real,
-                     linea_alt, home_nombre, away_nombre, estado, model_version, prob_mercado_novig, cuota_es_real)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                     linea_alt, home_nombre, away_nombre, estado, model_version, prob_mercado_novig,
+                     cuota_es_real, is_legacy, n_muestra, cuota_apertura, cuota_cierre)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?)
                     ON CONFLICT(fecha, game_id, mercado) DO UPDATE SET
                       seleccion=excluded.seleccion, cuota=excluded.cuota,
                       prob_real=excluded.prob_real, estado=excluded.estado,
                       model_version=excluded.model_version,
                       prob_mercado_novig=excluded.prob_mercado_novig,
-                      cuota_es_real=excluded.cuota_es_real
+                      cuota_es_real=excluded.cuota_es_real,
+                      n_muestra=excluded.n_muestra,
+                      cuota_cierre=excluded.cuota
                     WHERE resultado='PENDIENTE'""",
                     (str(fecha), g["id"], g["liga"], g["partido"], g["hora"], s["tipo"], s["seleccion"],
                      s["cuota"], s["prob"], s.get("linea_alt"), g["home"]["nombre"],
                      g["away"]["nombre"], s["estado"], MODEL_VERSION,
-                     s.get("prob_novig"), 0 if s.get("cuota_est", True) else 1))
+                     s.get("prob_novig"), 0 if s.get("cuota_est", True) else 1,
+                     n_m, s["cuota"], s["cuota"]))
 
 
 def verificar_resultados():
@@ -215,14 +220,24 @@ def _wilson(g, n, z=1.96):
     return round(max(0.0, ctr - rad), 4), round(min(1.0, ctr + rad), 4)
 
 
-def resumen():
+def resumen(solo_limpios: bool = False):
     with _conn() as c:
-        rows = [dict(r) for r in c.execute("SELECT * FROM picks ORDER BY fecha DESC, hora ASC, prob_real DESC")]
+        q = "SELECT * FROM picks"
+        if solo_limpios:
+            q += " WHERE COALESCE(is_legacy, 0) = 0"
+        q += " ORDER BY fecha DESC, hora ASC, prob_real DESC"
+        rows = [dict(r) for r in c.execute(q)]
+        muestra_limpia = c.execute("SELECT COUNT(*) FROM picks WHERE COALESCE(is_legacy,0)=0 AND resultado IN ('GANADA','PERDIDA')").fetchone()[0]
     gan = sum(1 for r in rows if r["resultado"] == "GANADA")
     per = sum(1 for r in rows if r["resultado"] == "PERDIDA")
     pen = sum(1 for r in rows if r["resultado"] == "PENDIENTE")
     decididas = gan + per
     beneficio = sum((r["cuota"] - 1) for r in rows if r["resultado"] == "GANADA") - per
+    clvs = [
+        (r["cuota_apertura"] / r["cuota_cierre"]) - 1.0
+        for r in rows
+        if r.get("cuota_apertura") and r.get("cuota_cierre") and r["cuota_cierre"] > 1.0
+    ]
 
     por_fecha = {}
     por_mercado = {}
@@ -298,6 +313,8 @@ def resumen():
         brier=round(brier_sum / brier_n, 4) if brier_n else None,
         brier_mercado=round(brier_mkt_sum / brier_mkt_n, 4) if brier_mkt_n else None,
         log_loss=round(logloss_sum / brier_n, 4) if brier_n else None,
+        clv_medio=round(sum(clvs) / len(clvs), 4) if clvs else None,
+        muestra_limpia=muestra_limpia,
         por_fecha=por_fecha,
         por_mercado=diag_mercados,
         calibracion=calibracion,
