@@ -1,5 +1,6 @@
 """Historial y Backtesting automático en SQLite para Fútbol Parley Lab."""
 import datetime as dt
+import json
 import math
 import shutil
 import sqlite3
@@ -47,9 +48,64 @@ def _conn():
         fecha TEXT, game_id TEXT, liga TEXT, partido TEXT, captured_at TEXT,
         ml_home REAL, ml_draw REAL, ml_away REAL, total_line REAL
     )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS tickets (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        fecha TEXT NOT NULL,
+        stake REAL DEFAULT 10.0,
+        cuota_total REAL DEFAULT 1.0,
+        prob_conjunta REAL DEFAULT 0.0,
+        patas_json TEXT NOT NULL,
+        resultado TEXT DEFAULT 'PENDIENTE',
+        beneficio REAL DEFAULT 0.0,
+        notas TEXT DEFAULT ''
+    )""")
     c.execute("CREATE INDEX IF NOT EXISTS idx_picks_fecha ON picks(fecha)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_odds_game ON odds_snapshots(game_id)")
     return c
+
+
+def guardar_ticket(data: dict):
+    stake = float(data.get("stake") or 10.0)
+    cuota = float(data.get("cuota_total") or 1.0)
+    prob = float(data.get("prob_conjunta") or 0.0)
+    res = (data.get("resultado") or "PENDIENTE").upper()
+    ben = round(stake * (cuota - 1.0), 2) if res == "GANADA" else (round(-stake, 2) if res == "PERDIDA" else 0.0)
+    with _conn() as c:
+        cur = c.execute(
+            "INSERT INTO tickets (fecha, stake, cuota_total, prob_conjunta, patas_json, resultado, beneficio, notas) VALUES (?,?,?,?,?,?,?,?)",
+            (data["fecha"], stake, cuota, prob, json.dumps(data.get("patas") or [], ensure_ascii=False), res, ben, (data.get("notas") or "").strip()),
+        )
+        return cur.lastrowid
+
+
+def listar_tickets():
+    with _conn() as c:
+        rows = [dict(r) for r in c.execute("SELECT * FROM tickets ORDER BY fecha DESC, id DESC").fetchall()]
+    for r in rows:
+        r["patas"] = json.loads(r.pop("patas_json", "[]"))
+    gan = sum(1 for r in rows if r["resultado"] == "GANADA")
+    per = sum(1 for r in rows if r["resultado"] == "PERDIDA")
+    pen = sum(1 for r in rows if r["resultado"] == "PENDIENTE")
+    ben = round(sum(r["beneficio"] for r in rows), 2)
+    return dict(total=len(rows), ganadas=gan, perdidas=per, pendientes=pen, beneficio=ben, tickets=rows)
+
+
+def estado_ticket(tid: int, resultado: str, notas: str = None):
+    res = resultado.upper()
+    with _conn() as c:
+        r = c.execute("SELECT stake, cuota_total, notas FROM tickets WHERE id=?", (tid,)).fetchone()
+        if not r:
+            return False
+        ben = round(r["stake"] * (r["cuota_total"] - 1.0), 2) if res == "GANADA" else (round(-r["stake"], 2) if res == "PERDIDA" else 0.0)
+        n_txt = r["notas"] if notas is None else notas.strip()
+        c.execute("UPDATE tickets SET resultado=?, beneficio=?, notas=? WHERE id=?", (res, ben, n_txt, tid))
+    return True
+
+
+def borrar_ticket(tid: int):
+    with _conn() as c:
+        c.execute("DELETE FROM tickets WHERE id=?", (tid,))
+    return True
 
 
 def registrar_jornada(fecha, partidos):

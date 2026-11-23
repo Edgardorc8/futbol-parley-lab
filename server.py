@@ -64,6 +64,30 @@ def api_historial(verificar: bool = True):
     return H.resumen()
 
 
+@app.get("/api/tickets")
+def api_get_tickets():
+    return H.listar_tickets()
+
+
+@app.post("/api/tickets")
+def api_post_ticket(datos: dict = Body(...)):
+    return dict(ok=True, id=H.guardar_ticket(datos))
+
+
+@app.patch("/api/tickets/{tid}")
+def api_patch_ticket(tid: int, datos: dict = Body(...)):
+    ok = H.estado_ticket(tid, datos.get("resultado", "PENDIENTE"), datos.get("notas"))
+    if not ok:
+        raise HTTPException(404, "Ticket no encontrado")
+    return dict(ok=True)
+
+
+@app.delete("/api/tickets/{tid}")
+def api_del_ticket(tid: int):
+    H.borrar_ticket(tid)
+    return dict(ok=True)
+
+
 @app.get("/api/excel")
 def excel(fecha: str = None):
     f = _fecha(fecha)

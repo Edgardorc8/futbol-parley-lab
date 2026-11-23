@@ -318,8 +318,81 @@
             <div><span class="mut">Ventaja (+EV)</span><b class="${ev > 0 ? 'pos' : 'neg'}">${(ev * 100).toFixed(1)}%</b></div>
             <div><span class="mut">Stake ¼ Kelly</span><b class="${kellyQ > 0 ? 'pos' : 'neg'}">${kellyQ > 0 ? '$' + stake.toFixed(2) : '$0.00 (NO BET)'}</b></div>
           </div>` : '<p class="mut">Marca selecciones en <b>🏆 Ranking Completo</b> para armar tu ticket y calcular el stake ¼ Kelly.</p>'}
-          <div style="margin-top:12px"><label class="mut">Bankroll ($): <input type="number" value="${bk}" style="width:90px" onchange="localStorage.setItem('fut_bankroll',this.value);renderParley()"></label></div>
-        </div>`;
+          <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+            <label class="mut">Bankroll ($): <input type="number" value="${bk}" style="width:85px" onchange="localStorage.setItem('fut_bankroll',this.value);renderParley()"></label>
+            ${sel.length ? `
+              <label class="mut">Stake ($): <input type="number" id="tk-stake" value="${Math.max(1, +(stake || 10)).toFixed(2)}" step="0.5" style="width:85px"></label>
+              <input id="tk-notas" placeholder="Nota (ej: Roja en Everton)" style="width:220px">
+              <button onclick="guardarTicketActual()" style="background:var(--ok);color:#000;font-weight:700">💾 Guardar Ticket</button>
+            ` : ""}
+          </div>
+        </div>
+        <div id="tk-guardados"></div>`;
+      cargarTicketsGuardados();
+    }
+
+    async function guardarTicketActual() {
+      const todas = DATA.partidos.flatMap(a => a.sel.map(s => ({ a, s, id: a.g.id + "|" + s.tipo })));
+      const sel = todas.filter(x => PICKS.has(x.id) && !jugado(x.a.g));
+      if (!sel.length) return;
+      const cuota = sel.reduce((c, x) => c * x.s.cuota, 1);
+      const prob = sel.reduce((p, x) => p * x.s.prob, 1);
+      await fetch("/api/tickets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fecha: DATA.fecha,
+          stake: parseFloat($("tk-stake").value) || 10,
+          cuota_total: +cuota.toFixed(3),
+          prob_conjunta: +prob.toFixed(4),
+          notas: $("tk-notas").value.trim(),
+          patas: sel.map(x => ({ hora: x.a.g.hora, partido: x.a.g.partido, mercado: x.s.tipo, seleccion: x.s.seleccion, cuota: x.s.cuota })),
+        }),
+      });
+      PICKS.clear();
+      renderRanking();
+      renderParley();
+    }
+
+    async function cargarTicketsGuardados() {
+      const el = $("tk-guardados");
+      if (!el) return;
+      const d = await (await fetch("/api/tickets")).json();
+      const cRes = r => r === "GANADA" ? "ok" : r === "PERDIDA" ? "bad" : "warn";
+      el.innerHTML = `<div class="card">
+        <h3>🗂️ Mis Tickets Guardados (${d.total}) <span class="mut">G/P/Pend: <b>${d.ganadas}/${d.perdidas}/${d.pendientes}</b> · Neto: <b class="${d.beneficio >= 0 ? 'pos' : 'neg'}">${d.beneficio >= 0 ? '+' : ''}$${d.beneficio.toFixed(2)}</b></span></h3>
+        ${d.tickets.length ? `<table>
+          <thead><tr><th>Fecha</th><th>Patas</th><th>Stake</th><th>Cuota</th><th>Beneficio</th><th>Nota</th><th>Estado</th><th>Acciones</th></tr></thead>
+          <tbody>${d.tickets.map(t => `<tr>
+            <td>${t.fecha}</td>
+            <td>${t.patas.map(p => `<div><b>${p.partido}</b> (${p.hora || ""}): ${p.seleccion} @${(+p.cuota).toFixed(2)}</div>`).join("")}</td>
+            <td>$${t.stake.toFixed(2)}</td><td>${t.cuota_total.toFixed(2)}</td>
+            <td class="${t.beneficio >= 0 ? 'pos' : 'neg'}">${t.beneficio >= 0 ? '+' : ''}$${t.beneficio.toFixed(2)}</td>
+            <td class="mut">${t.notas || "—"}</td>
+            <td><span class="tag ${cRes(t.resultado)}">${t.resultado}</span></td>
+            <td style="white-space:nowrap">
+              <button onclick="setEstadoTicket(${t.id},'GANADA')" title="Ganada">✓</button>
+              <button onclick="setEstadoTicket(${t.id},'PERDIDA')" title="Perdida">✕</button>
+              <button onclick="notaTicket(${t.id},'${t.resultado}','${(t.notas || '').replace(/'/g, '')}')" title="Nota">📝</button>
+              <button onclick="delTicket(${t.id})" title="Eliminar">🗑</button>
+            </td></tr>`).join("")}</tbody>
+        </table>` : '<p class="mut">Aún no has guardado tickets. Marca selecciones en 🏆 Ranking Completo y pulsa 💾 Guardar Ticket.</p>'}
+      </div>`;
+    }
+
+    async function setEstadoTicket(id, resultado) {
+      await fetch("/api/tickets/" + id, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ resultado }) });
+      cargarTicketsGuardados();
+    }
+    async function notaTicket(id, resultado, actual) {
+      const n = prompt("Nota del ticket (ej: Falló por roja en Everton):", actual);
+      if (n === null) return;
+      await fetch("/api/tickets/" + id, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ resultado, notas: n }) });
+      cargarTicketsGuardados();
+    }
+    async function delTicket(id) {
+      await fetch("/api/tickets/" + id, { method: "DELETE" });
+      cargarTicketsGuardados();
     }
 
     let HIST = null, CAL_Y = new Date().getFullYear(), CAL_M = new Date().getMonth(), CAL_SEL = "", HIS_MKT = "TODOS", HIS_LIGA = "TODAS";
