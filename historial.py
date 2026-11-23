@@ -197,6 +197,17 @@ def verificar_resultados():
     return liquidados
 
 
+def _wilson(g, n, z=1.96):
+    """Intervalo de confianza Wilson al 95% para una proporción g/n."""
+    if not n:
+        return None, None
+    p = g / n
+    den = 1.0 + z * z / n
+    ctr = (p + z * z / (2 * n)) / den
+    rad = (z * math.sqrt((p * (1 - p) + z * z / (4 * n)) / n)) / den
+    return round(max(0.0, ctr - rad), 4), round(min(1.0, ctr + rad), 4)
+
+
 def resumen():
     with _conn() as c:
         rows = [dict(r) for r in c.execute("SELECT * FROM picks ORDER BY fecha DESC, hora ASC, prob_real DESC")]
@@ -209,11 +220,12 @@ def resumen():
     por_fecha = {}
     por_mercado = {}
     tramos = {"<60%": [0, 0, 0.0], "60-70%": [0, 0, 0.0], "70-80%": [0, 0, 0.0], "80%+": [0, 0, 0.0]}
-    brier_sum, logloss_sum, brier_n = 0.0, 0.0, 0
+    brier_sum, brier_mkt_sum, brier_mkt_n, logloss_sum, brier_n = 0.0, 0.0, 0, 0.0, 0
     for r in rows:
         d = por_fecha.setdefault(r["fecha"], dict(ganadas=0, perdidas=0, pendientes=0, beneficio_u=0.0))
         m = por_mercado.setdefault(r["mercado"], dict(mercado=r["mercado"], ganadas=0, perdidas=0, pendientes=0, prob_sum=0.0, dec=0, beneficio_u=0.0))
         p_cl = max(0.01, min(0.99, float(r["prob_real"] or 0.5)))
+        pm_nv = r.get("prob_mercado_novig")
         tk = "<60%" if p_cl < 0.60 else ("60-70%" if p_cl < 0.70 else ("70-80%" if p_cl < 0.80 else "80%+"))
         if r["resultado"] == "GANADA":
             d["ganadas"] += 1
@@ -221,6 +233,8 @@ def resumen():
             m["ganadas"] += 1; m["dec"] += 1; m["prob_sum"] += p_cl
             m["beneficio_u"] = round(m["beneficio_u"] + (r["cuota"] - 1), 2)
             brier_sum += (p_cl - 1.0) ** 2; logloss_sum += -math.log(p_cl); brier_n += 1
+            if pm_nv is not None:
+                brier_mkt_sum += (float(pm_nv) - 1.0) ** 2; brier_mkt_n += 1
             tramos[tk][0] += 1; tramos[tk][1] += 1; tramos[tk][2] += p_cl
         elif r["resultado"] == "PERDIDA":
             d["perdidas"] += 1
@@ -228,6 +242,8 @@ def resumen():
             m["perdidas"] += 1; m["dec"] += 1; m["prob_sum"] += p_cl
             m["beneficio_u"] = round(m["beneficio_u"] - 1, 2)
             brier_sum += (p_cl - 0.0) ** 2; logloss_sum += -math.log(1.0 - p_cl); brier_n += 1
+            if pm_nv is not None:
+                brier_mkt_sum += (float(pm_nv) - 0.0) ** 2; brier_mkt_n += 1
             tramos[tk][1] += 1; tramos[tk][2] += p_cl
         elif r["resultado"] == "PENDIENTE":
             d["pendientes"] += 1
@@ -248,19 +264,23 @@ def resumen():
         dec = m["dec"]
         ac = round(m["ganadas"] / dec, 4) if dec else None
         pe = round(m["prob_sum"] / dec, 4) if dec else None
-        muestra = "Confiable (100+)" if dec >= 100 else ("Tendencia (30-99)" if dec >= 30 else f"Muestra baja ({dec})")
+        lo, hi = _wilson(m["ganadas"], dec)
+        muestra = "Confiable (100+)" if dec >= 100 else ("Tendencia (30-99)" if dec >= 30 else f"NO VALIDADO ({dec})")
         diag_mercados.append(dict(
             mercado=m["mercado"], ganadas=m["ganadas"], perdidas=m["perdidas"], pendientes=m["pendientes"],
-            dec=dec, muestra=muestra,
+            dec=dec, muestra=muestra, ic_lo=lo, ic_hi=hi,
             acierto=ac, prob_esperada=pe, sesgo=round(ac - pe, 4) if (ac is not None and pe is not None) else None,
             roi=round(m["beneficio_u"] / dec, 4) if dec else None, beneficio_u=m["beneficio_u"],
         ))
     diag_mercados.sort(key=lambda x: -(x["ganadas"] + x["perdidas"] + x["pendientes"]))
-    calibracion = [
-        dict(tramo=k, n=v[1], acierto=round(v[0] / v[1], 4) if v[1] else None,
-             esperada=round(v[2] / v[1], 4) if v[1] else None)
-        for k, v in tramos.items() if v[1] > 0
-    ]
+    calibracion = []
+    for k, v in tramos.items():
+        if v[1] > 0:
+            lo, hi = _wilson(v[0], v[1])
+            calibracion.append(dict(
+                tramo=k, n=v[1], acierto=round(v[0] / v[1], 4),
+                esperada=round(v[2] / v[1], 4), ic_lo=lo, ic_hi=hi,
+            ))
 
     return dict(
         total=len(rows), ganadas=gan, perdidas=per, pendientes=pen,
@@ -269,6 +289,7 @@ def resumen():
         beneficio_u=round(beneficio, 2),
         max_dd_u=round(max_dd, 2),
         brier=round(brier_sum / brier_n, 4) if brier_n else None,
+        brier_mercado=round(brier_mkt_sum / brier_mkt_n, 4) if brier_mkt_n else None,
         log_loss=round(logloss_sum / brier_n, 4) if brier_n else None,
         por_fecha=por_fecha,
         por_mercado=diag_mercados,

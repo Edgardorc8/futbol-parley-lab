@@ -302,7 +302,9 @@
       const todas = DATA.partidos.flatMap(a => a.sel.map(s => ({ a, s, id: a.g.id + "|" + s.tipo })));
       const sel = todas.filter(x => PICKS.has(x.id) && !jugado(x.a.g));
       const cuota = sel.reduce((c, x) => c * x.s.cuota, 1);
-      const prob = sel.reduce((p, x) => p * x.s.prob, 1);
+      const probRaw = sel.reduce((p, x) => p * x.s.prob, 1);
+      const corrPen = sel.length > 1 ? Math.pow(0.92, sel.length - 1) : 1.0;
+      const prob = probRaw * corrPen;
       const bk = parseFloat(localStorage.getItem("fut_bankroll") || "100");
       const ev = prob * cuota - 1;
       const kellyQ = ev > 0 ? Math.min(0.05, (ev / (cuota - 1)) * 0.25) : 0;
@@ -467,19 +469,22 @@
             <div><span class="mut">ROI</span><b class="${(h.roi || 0) >= 0 ? 'pos' : 'neg'}">${pct(h.roi)}</b></div>
             <div><span class="mut">Beneficio</span><b>${h.beneficio_u >= 0 ? '+' : ''}${h.beneficio_u} u</b></div>
             <div><span class="mut">Max Drawdown</span><b class="neg">-${(h.max_dd_u || 0).toFixed(2)} u</b></div>
-            <div><span class="mut">Brier / Log-Loss</span><b>${h.brier != null ? h.brier.toFixed(3) : '—'} / ${h.log_loss != null ? h.log_loss.toFixed(3) : '—'}</b></div>
+            <div><span class="mut">Brier Mod / Mkt</span><b>${h.brier != null ? h.brier.toFixed(3) : '—'} / ${h.brier_mercado != null ? h.brier_mercado.toFixed(3) : '—'}</b></div>
+            <div><span class="mut">Log-Loss</span><b>${h.log_loss != null ? h.log_loss.toFixed(3) : '—'}</b></div>
           </div>
         </div>
         ${(h.calibracion || []).length ? `<div class="card" style="margin-bottom:14px">
-          <h3>📐 Curva de Calibración por Tramo de Probabilidad</h3>
-          <table><thead><tr><th>Tramo</th><th>Muestra (N)</th><th>Prob. Modelo</th><th>% Acierto Real</th></tr></thead>
-          <tbody>${h.calibracion.map(c => `<tr><td><b>${c.tramo}</b></td><td>${c.n}</td><td>${pct(c.esperada)}</td><td class="pos">${pct(c.acierto)}</td></tr>`).join("")}</tbody></table>
+          <h3>📐 Curva de Calibración por Tramo (con IC 95% Wilson)</h3>
+          <table><thead><tr><th>Tramo</th><th>Muestra (N)</th><th>Prob. Modelo</th><th>% Acierto Real</th><th>IC 95% Wilson</th></tr></thead>
+          <tbody>${h.calibracion.map(c => `<tr><td><b>${c.tramo}</b></td><td>${c.n}</td><td>${pct(c.esperada)}</td><td class="pos">${pct(c.acierto)}</td>
+            <td class="mut">${c.ic_lo != null ? `[${pct(c.ic_lo)}, ${pct(c.ic_hi)}]` : '—'}</td></tr>`).join("")}</tbody></table>
         </div>` : ''}
         ${(h.por_mercado || []).length ? `<div class="card" style="margin-bottom:14px">
-          <h3>🔬 Diagnóstico del Modelo por Mercado</h3>
-          <table><thead><tr><th>Mercado</th><th>G/P/Pend</th><th>Prob. Modelo</th><th>% Real</th><th>Sesgo</th><th>ROI</th><th>Muestra</th></tr></thead>
+          <h3>🔬 Diagnóstico del Modelo por Mercado (IC 95% Wilson)</h3>
+          <table><thead><tr><th>Mercado</th><th>G/P/Pend</th><th>Prob. Modelo</th><th>% Real</th><th>IC 95% Wilson</th><th>Sesgo</th><th>ROI</th><th>Muestra</th></tr></thead>
           <tbody>${h.por_mercado.map(m => `<tr><td><b>${m.mercado}</b></td><td>${m.ganadas}/${m.perdidas}/${m.pendientes}</td>
             <td>${m.prob_esperada != null ? pct(m.prob_esperada) : '—'}</td><td><b>${m.acierto != null ? pct(m.acierto) : '—'}</b></td>
+            <td class="mut">${m.ic_lo != null ? `[${pct(m.ic_lo)}, ${pct(m.ic_hi)}]` : '—'}</td>
             <td class="${(m.sesgo || 0) >= 0 ? 'pos' : 'neg'}">${m.sesgo != null ? (m.sesgo >= 0 ? '+' : '') + (m.sesgo * 100).toFixed(1) + '%' : '—'}</td>
             <td class="${(m.roi || 0) >= 0 ? 'pos' : 'neg'}">${m.roi != null ? (m.roi * 100).toFixed(1) + '%' : '—'}</td>
             <td><span class="tag ${(m.dec || 0) >= 100 ? 'ok' : (m.dec || 0) >= 30 ? 'warn' : 'bad'}">${m.muestra || m.dec || 0}</span></td></tr>`).join('')}</tbody></table>
