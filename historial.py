@@ -41,12 +41,19 @@ def _conn():
         UNIQUE(fecha, game_id, mercado)
     )""")
     cols = {r[1] for r in c.execute("PRAGMA table_info(picks)").fetchall()}
-    if "model_version" not in cols:
-        c.execute("ALTER TABLE picks ADD COLUMN model_version TEXT DEFAULT 'v1'")
-    if "prob_mercado_novig" not in cols:
-        c.execute("ALTER TABLE picks ADD COLUMN prob_mercado_novig REAL")
-    if "cuota_es_real" not in cols:
-        c.execute("ALTER TABLE picks ADD COLUMN cuota_es_real INTEGER DEFAULT 0")
+    for col, tipo in (
+        ("model_version", "TEXT DEFAULT 'v1'"),
+        ("prob_mercado_novig", "REAL"),
+        ("cuota_es_real", "INTEGER DEFAULT 0"),
+        ("is_legacy", "INTEGER DEFAULT 0"),
+        ("n_muestra", "INTEGER"),
+        ("cuota_apertura", "REAL"),
+        ("cuota_cierre", "REAL"),
+    ):
+        if col not in cols:
+            c.execute(f"ALTER TABLE picks ADD COLUMN {col} {tipo}")
+    # Marcar picks antiguos sin prob_mercado_novig como legacy (sin borrarlos)
+    c.execute("UPDATE picks SET is_legacy=1 WHERE prob_mercado_novig IS NULL AND (is_legacy IS NULL OR is_legacy=0)")
     c.execute("""CREATE TABLE IF NOT EXISTS odds_snapshots (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         fecha TEXT, game_id TEXT, liga TEXT, partido TEXT, captured_at TEXT,

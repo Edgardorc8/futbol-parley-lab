@@ -128,8 +128,8 @@ def analizar(fecha, log=print):
             p1=p1, p2=p2, casa=cc,
         ))
 
-    # Top Parley corto de élite: priorizar mercados con ROI positivo real (Doble Oportunidad, Ganador 2G, Ambos Marcan, Over 1.5) y LUZ VERDE
-    MERCADOS_ELITE = {"Doble Oportunidad", "Ganador (2 Goles)", "Ambos Marcan", "Total OVER 1.5"}
+    # Top Parley corto de élite: solo mercados con ROI positivo y N>=30 (Doble Oportunidad y Ambos Marcan)
+    MERCADOS_ELITE = {"Doble Oportunidad", "Ambos Marcan"}
     ahora_utc = dt.datetime.now(dt.timezone.utc)
     eleg = []
     for a in analisis:

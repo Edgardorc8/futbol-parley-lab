@@ -198,7 +198,7 @@
     function renderRanking() {
       const prox = DATA.partidos.filter(a => !jugado(a.g));
       const todas = prox.flatMap(a => a.sel.map(s => ({ a, s, id: a.g.id + "|" + s.tipo })));
-      todas.sort((x, y) => (bloq(x.s.estado) - bloq(y.s.estado)) || (y.s.prob - x.s.prob));
+      todas.sort((x, y) => (bloq(x.s.estado) - bloq(y.s.estado)) || ((y.s.ev_ajustado ?? y.s.ventaja) - (x.s.ev_ajustado ?? x.s.ventaja)));
       const tipos = ["TODOS", "Doble Oportunidad", "Ganador (2 Goles)", "Total OVER 2.5", "Total UNDER 2.5", "Total OVER 1.5", "Total UNDER 3.5", "Ambos Marcan", "Hándicap +1.5"];
       const lista = RK_FILTRO === "TODOS" ? todas : todas.filter(x => x.s.tipo === RK_FILTRO);
       $("v-rk").innerHTML = `
@@ -297,6 +297,19 @@
       $("v-pr").innerHTML = pills + bloques;
     }
 
+    const MERCADOS_DESACTIVADOS = new Set(["Total UNDER 3.5", "Hándicap +1.5", "Total OVER 2.5"]);
+    function validarParley(sel, cuota, probAdj) {
+      const err = [];
+      if (sel.length > 4) err.push("Máximo 4 patas permitidas.");
+      if (new Set(sel.map(x => x.a.g.id)).size < sel.length) err.push("Máximo 1 pata por partido.");
+      if (sel.filter(x => ["uefa.champions", "uefa.europa"].includes(x.a.g.liga)).length > 2) err.push("Máximo 2 patas de UCL/UEL.");
+      if (sel.some(x => x.s.cuota_est)) err.push("Contiene cuota estimada (cuota_est=True). Carga cuotas reales en CSV.");
+      if (sel.some(x => MERCADOS_DESACTIVADOS.has(x.s.tipo))) err.push("Contiene mercados desactivados por ROI negativo.");
+      const evP = probAdj * cuota - 1;
+      if (sel.length && evP > 0.30) err.push(`SOBRECONFIANZA: EV aparente ${(evP * 100).toFixed(1)}% (>30%).`);
+      return err;
+    }
+
     function renderParley() {
       if (!DATA) return;
       const todas = DATA.partidos.flatMap(a => a.sel.map(s => ({ a, s, id: a.g.id + "|" + s.tipo })));
@@ -309,26 +322,28 @@
       const ev = prob * cuota - 1;
       const kellyQ = ev > 0 ? Math.min(0.05, (ev / (cuota - 1)) * 0.25) : 0;
       const stake = bk * kellyQ;
+      const errores = validarParley(sel, cuota, prob);
 
       $("v-tk").innerHTML = `
         <div class="card hero">
           <h2>🎟️ Mi Parley Personalizado (${sel.length} patas) <button onclick="PICKS.clear();renderRanking();renderParley()">🗑️ Limpiar</button></h2>
+          ${errores.length ? `<div style="background:#7f1d1d;color:#fecaca;padding:8px 12px;border-radius:8px;margin-bottom:10px;font-size:12.5px"><b>⚠️ Validación de Parley:</b><br>${errores.map(e => "• " + e).join("<br>")}</div>` : ""}
           ${sel.length ? `<table>
             <tr><th>Hora VET</th><th>Partido</th><th>Mercado</th><th>Selección</th><th>Cuota</th><th>Prob.</th><th></th></tr>
-            ${sel.map(x => `<tr><td>${x.a.g.hora}</td><td>${mLogo(x.a.g)}</td><td>${x.s.tipo}</td><td><b>${x.s.seleccion}</b></td><td>${x.s.cuota.toFixed(2)}</td><td class="pos">${pct(x.s.prob)}</td><td><button onclick="PICKS.delete('${x.id}');renderRanking();renderParley()">✕</button></td></tr>`).join("")}
+            ${sel.map(x => `<tr><td>${x.a.g.hora}</td><td>${mLogo(x.a.g)}</td><td>${x.s.tipo}</td><td><b>${x.s.seleccion}</b></td><td>${x.s.cuota.toFixed(2)}${x.s.cuota_est ? "*" : ""}</td><td class="pos">${pct(x.s.prob)}</td><td><button onclick="PICKS.delete('${x.id}');renderRanking();renderParley()">✕</button></td></tr>`).join("")}
           </table>
           <div class="kpi">
             <div><span class="mut">Cuota total</span><b>${cuota.toFixed(2)}</b></div>
-            <div><span class="mut">Prob. conjunta</span><b class="pos">${pct(prob)}</b></div>
-            <div><span class="mut">Ventaja (+EV)</span><b class="${ev > 0 ? 'pos' : 'neg'}">${(ev * 100).toFixed(1)}%</b></div>
+            <div><span class="mut">Prob. ajustada (×${corrPen.toFixed(2)})</span><b class="pos">${pct(prob)}</b></div>
+            <div><span class="mut">EV real</span><b class="${ev > 0 ? 'pos' : 'neg'}">${(ev * 100).toFixed(1)}%</b></div>
             <div><span class="mut">Stake ¼ Kelly</span><b class="${kellyQ > 0 ? 'pos' : 'neg'}">${kellyQ > 0 ? '$' + stake.toFixed(2) : '$0.00 (NO BET)'}</b></div>
-          </div>` : '<p class="mut">Marca selecciones en <b>🏆 Ranking Completo</b> para armar tu ticket y calcular el stake ¼ Kelly.</p>'}
+          </div>` : '<p class="mut">Marca selecciones en <b>🎯 Qué Apostar</b> o <b>🏆 Ranking Completo</b> para armar tu ticket y calcular el stake ¼ Kelly.</p>'}
           <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
             <label class="mut">Bankroll ($): <input type="number" value="${bk}" style="width:85px" onchange="localStorage.setItem('fut_bankroll',this.value);renderParley()"></label>
             ${sel.length ? `
               <label class="mut">Stake ($): <input type="number" id="tk-stake" value="${Math.max(1, +(stake || 10)).toFixed(2)}" step="0.5" style="width:85px"></label>
               <input id="tk-notas" placeholder="Nota (ej: Roja en Everton)" style="width:220px">
-              <button onclick="guardarTicketActual()" style="background:var(--ok);color:#000;font-weight:700">💾 Guardar Ticket</button>
+              <button onclick="guardarTicketActual()" ${errores.length ? 'disabled style="opacity:0.45;cursor:not-allowed"' : 'style="background:var(--ok);color:#000;font-weight:700"'}>💾 Guardar Ticket</button>
             ` : ""}
           </div>
         </div>
