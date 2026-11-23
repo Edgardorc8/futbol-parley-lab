@@ -96,7 +96,8 @@ def analizar(fecha, log=print):
 
         proy = M.proyectar(sh, sa, l5h, l5a, lg, fat_h=fat_h, fat_a=fat_a)
         cc = casa.get(g["partido"], {})
-        sel, p1, p2 = M.evaluar_partido(g, proy, cc)
+        n_muestra = min(sh.get("pj", 4) or 4, sa.get("pj", 4) or 4)
+        sel, p1, p2 = M.evaluar_partido(g, proy, cc, n_muestra=n_muestra)
         props = M.sugerir_props(g, proy, pl_h, pl_a, lg)
 
         analisis.append(dict(
@@ -122,18 +123,22 @@ def analizar(fecha, log=print):
         if ya_empezo:
             continue
         for s in a["sel"]:
-            if not M.bloqueado(s["estado"]) and s["tipo"] in MERCADOS_ELITE and s["prob"] >= 0.65 and s["ventaja"] > 0:
+            if not M.bloqueado(s["estado"]) and "DISCREPANCIA EXTREMA" not in s["estado"] and s["tipo"] in MERCADOS_ELITE and s["prob"] >= 0.65 and s["ventaja"] > 0:
                 eleg.append(dict(
-                    id=f"{a['g']['id']}|{s['tipo']}",
+                    id=f"{a['g']['id']}|{s['tipo']}", liga_slug=a["g"]["liga"],
                     partido=a["g"]["partido"], liga=a["g"]["liga_nombre"], hora=a["g"]["hora"],
                     mercado=s["tipo"], seleccion=s["seleccion"], cuota=s["cuota"],
-                    prob=s["prob"], ventaja=s["ventaja"], estado=s["estado"],
+                    prob=s["prob"], ventaja=s["ventaja"], ev_ajustado=s.get("ev_ajustado", s["ventaja"]),
+                    cuota_est=s.get("cuota_est", False), estado=s["estado"],
                 ))
-    eleg.sort(key=lambda x: (0 if x["estado"].startswith("LUZ") else 1, -(x["ventaja"] * 0.5 + x["prob"] * 0.5)))
-    vistos, top = set(), []
+    eleg.sort(key=lambda x: (0 if x["estado"].startswith("LUZ") else 1, -x["ev_ajustado"]))
+    vistos, top, uefa_cnt = set(), [], 0
     for x in eleg:
-        if x["partido"] not in vistos:
+        es_uefa = x["liga_slug"] in ("uefa.champions", "uefa.europa")
+        if x["partido"] not in vistos and (not es_uefa or uefa_cnt < 2):
             vistos.add(x["partido"])
+            if es_uefa:
+                uefa_cnt += 1
             top.append(x)
         if len(top) == 4:
             break

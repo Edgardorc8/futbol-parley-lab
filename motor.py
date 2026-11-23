@@ -161,8 +161,8 @@ def ajuste_situacional(lado, proy, linea):
     return max(-ADJ_CAP, min(ADJ_CAP, a)), ", ".join(mot) or "neutral"
 
 
-def evaluar_partido(g, proy, cc):
-    """Evalúa Lado Protegido (1X / X2 / Ganador 2G) y Totales (Under 3.5 / Over 1.5) en Doble Escenario."""
+def evaluar_partido(g, proy, cc, n_muestra=10):
+    """Evalúa mercados con Dixon-Coles + Shrinkage Jerárquico w = n/(n+k) + EV real (p*O - 1)."""
     m1 = matriz_dixon_coles(proy["cal_h"], proy["cal_a"])
     m2 = matriz_dixon_coles(proy["l5_h"], proy["l5_a"])
     p1, p2 = probs_matriz(m1), probs_matriz(m2)
@@ -172,122 +172,148 @@ def evaluar_partido(g, proy, cc):
 
     nvh, nvd, nva, vig = devig_1x2(g["dk"]["ml_home"], g["dk"]["ml_draw"], g["dk"]["ml_away"])
 
-    # Anclaje al mercado: matriz Dixon-Coles implícita en la línea oficial + 1X2 sin vig (evita cuotas circulares)
+    # Shrinkage jerárquico por tamaño de muestra: w = n / (n + k) — k=14 en UCL/UEL, k=8 en ligas domésticas
+    n_eff = max(1, int(n_muestra or 4))
+    k_liga = 14.0 if g.get("liga") in ("uefa.champions", "uefa.europa") else 8.0
+    w_mod = round(n_eff / (n_eff + k_liga), 4)
+
+    # Anclaje al mercado: matriz Dixon-Coles implícita en la línea oficial + 1X2 sin vig
     share_h = (nvh / (nvh + nva)) if (nvh and nva and (nvh + nva) > 0) else 0.55
     mkt_h = max(0.40, linea * share_h)
     mkt_a = max(0.35, linea * (1.0 - share_h))
-    pm = probs_matriz(matriz_dixon_coles(mkt_h, mkt_a))
+    mm = matriz_dixon_coles(mkt_h, mkt_a)
+    pm = probs_matriz(mm)
     vig_m = 1.055  # margen estándar de casa ~5.5%
+
+    def _shrink(p_mod, p_mkt):
+        return round(w_mod * p_mod + (1.0 - w_mod) * p_mkt, 4)
+
+    def _ev(p_real, cuota):
+        return round(p_real * cuota - 1.0, 4)
 
     sel = []
 
-    # 1. Lado Protegido: Doble Oportunidad (1X o X2) o Ganador Pago Anticipado 2G si favorito muy claro
+    # 1. Lado Protegido: Doble Oportunidad (1X o X2) o Ganador Pago Anticipado 2G
     fav_home = p1["p_home"] >= p1["p_away"]
     t_fav = g["home"]["nombre"] if fav_home else g["away"]["nombre"]
     if fav_home:
-        prob_dc = min(p1["p_1x"], p2["p_1x"])
-        cuota_dc = cc.get("dc_1x") or round(max(1.12, 1 / min(0.89, (nvh + nvd) * 1.05 if nvh else prob_dc)), 2)
+        pm_dc = round(nvh + nvd, 4) if (nvh and nvd) else pm["p_1x"]
+        prob_dc = _shrink(min(p1["p_1x"], p2["p_1x"]), pm_dc)
+        cuota_dc = cc.get("dc_1x") or round(max(1.12, 1 / min(0.89, pm_dc * vig_m)), 2)
         est_dc = "dc_1x" not in cc
+        ev_dc = _ev(prob_dc, cuota_dc)
         sel.append(dict(
             tipo="Doble Oportunidad", seleccion=f"{t_fav} o Empate (1X)",
-            p1=p1["p_1x"], p2=p2["p_1x"], prob=prob_dc,
+            p1=p1["p_1x"], p2=p2["p_1x"], prob=prob_dc, prob_novig=pm_dc,
             cuota=cuota_dc, cuota_est=est_dc, implicita=1 / cuota_dc,
-            ventaja=prob_dc - 1 / cuota_dc,
-            estado=estado_sel("lado", linea, cuota_dc, est_dc),
-            prob_novig=round(nvh + nvd, 4) if nvh else None, vig=vig,
+            edge_pp=round(prob_dc - pm_dc, 4), ventaja=ev_dc, ev_ajustado=round(ev_dc * w_mod, 4), w_mod=w_mod,
+            estado=estado_sel("lado", linea, cuota_dc, est_dc, ventaja=ev_dc, edge_pp=prob_dc - pm_dc), vig=vig,
         ))
         if p1["p_home_2g"] >= 0.68:
+            pm_2g = nvh or pm["p_home"]
             cuota_ml = cc.get("ml_local") or g["dk"]["ml_home"] or 1.45
             est_ml = "ml_local" not in cc and not g["dk"]["ml_home"]
-            prob_2g = min(p1["p_home_2g"], p2["p_home_2g"])
+            prob_2g = _shrink(min(p1["p_home_2g"], p2["p_home_2g"]), min(0.92, pm_2g + 0.03))
+            ev_2g = _ev(prob_2g, cuota_ml)
             sel.append(dict(
                 tipo="Ganador (2 Goles)", seleccion=f"{t_fav} Ganador (Pago Ant. 2G)",
-                p1=p1["p_home_2g"], p2=p2["p_home_2g"], prob=prob_2g,
+                p1=p1["p_home_2g"], p2=p2["p_home_2g"], prob=prob_2g, prob_novig=pm_2g,
                 cuota=cuota_ml, cuota_est=est_ml, implicita=1 / cuota_ml,
-                ventaja=prob_2g - 1 / cuota_ml,
-                estado=estado_sel("lado", linea, cuota_ml, est_ml),
-                prob_novig=nvh, vig=vig,
+                edge_pp=round(prob_2g - pm_2g, 4), ventaja=ev_2g, ev_ajustado=round(ev_2g * w_mod, 4), w_mod=w_mod,
+                estado=estado_sel("lado", linea, cuota_ml, est_ml, ventaja=ev_2g, edge_pp=prob_2g - pm_2g), vig=vig,
             ))
     else:
-        prob_dc = min(p1["p_x2"], p2["p_x2"])
-        cuota_dc = cc.get("dc_x2") or round(max(1.12, 1 / min(0.89, (nva + nvd) * 1.05 if nva else prob_dc)), 2)
+        pm_dc = round(nva + nvd, 4) if (nva and nvd) else pm["p_x2"]
+        prob_dc = _shrink(min(p1["p_x2"], p2["p_x2"]), pm_dc)
+        cuota_dc = cc.get("dc_x2") or round(max(1.12, 1 / min(0.89, pm_dc * vig_m)), 2)
         est_dc = "dc_x2" not in cc
+        ev_dc = _ev(prob_dc, cuota_dc)
         sel.append(dict(
             tipo="Doble Oportunidad", seleccion=f"{t_fav} o Empate (X2)",
-            p1=p1["p_x2"], p2=p2["p_x2"], prob=prob_dc,
+            p1=p1["p_x2"], p2=p2["p_x2"], prob=prob_dc, prob_novig=pm_dc,
             cuota=cuota_dc, cuota_est=est_dc, implicita=1 / cuota_dc,
-            ventaja=prob_dc - 1 / cuota_dc,
-            estado=estado_sel("lado", linea, cuota_dc, est_dc),
-            prob_novig=round(nva + nvd, 4) if nva else None, vig=vig,
+            edge_pp=round(prob_dc - pm_dc, 4), ventaja=ev_dc, ev_ajustado=round(ev_dc * w_mod, 4), w_mod=w_mod,
+            estado=estado_sel("lado", linea, cuota_dc, est_dc, ventaja=ev_dc, edge_pp=prob_dc - pm_dc), vig=vig,
         ))
 
-    # 2. Totales UNDER (Under 3.5 Protegido + Under 2.5 Estándar) — cuotas ancladas al mercado
+    # 2. Totales UNDER (Under 3.5 Protegido + Under 2.5 Estándar) — con shrinkage y EV real
     adj_u, mot_u = ajuste_situacional("under", proy, linea)
     for ln_u, key_u, tipo_u, lbl_u in (
         (3.5, "p_u35", "Total UNDER 3.5", "Under 3.5 Goles"),
         (2.5, "p_u25", "Total UNDER 2.5", "Under 2.5 Goles"),
     ):
         pu1, pu2 = min(0.92, p1[key_u] + adj_u), min(0.92, p2[key_u] + adj_u)
-        cuota_u = cc.get(f"under{int(ln_u*10)}") or round(max(1.12, 1 / min(0.90, max(0.20, pm[key_u]) * vig_m)), 2)
+        pm_u = pm[key_u]
+        prob_u = _shrink(min(pu1, pu2), pm_u)
+        cuota_u = cc.get(f"under{int(ln_u*10)}") or round(max(1.12, 1 / min(0.90, max(0.20, pm_u) * vig_m)), 2)
         est_u = f"under{int(ln_u*10)}" not in cc
-        prob_u = min(pu1, pu2)
+        ev_u = _ev(prob_u, cuota_u)
         sel.append(dict(
             tipo=tipo_u, seleccion=lbl_u, linea_alt=ln_u,
             base1=p1[key_u], base2=p2[key_u], adj=adj_u, motivo=mot_u,
-            p1=pu1, p2=pu2, prob=prob_u, cuota=cuota_u, cuota_est=est_u,
-            implicita=1 / cuota_u, ventaja=prob_u - 1 / cuota_u,
-            estado=estado_sel("under", linea, cuota_u, est_u, disc=alerta_tot),
+            p1=pu1, p2=pu2, prob=prob_u, prob_novig=round(pm_u, 4), cuota=cuota_u, cuota_est=est_u,
+            implicita=1 / cuota_u, edge_pp=round(prob_u - pm_u, 4), ventaja=ev_u,
+            ev_ajustado=round(ev_u * w_mod, 4), w_mod=w_mod,
+            estado=estado_sel("under", linea, cuota_u, est_u, disc=alerta_tot, ventaja=ev_u, edge_pp=prob_u - pm_u),
         ))
 
-    # 3. Totales OVER (Over 1.5 Protegido + Over 2.5 Estándar) — cuotas ancladas al mercado
+    # 3. Totales OVER (Over 1.5 Protegido + Over 2.5 Estándar) — con shrinkage y EV real
     adj_o, mot_o = ajuste_situacional("over", proy, linea)
     for ln_o, key_o, tipo_o, lbl_o in (
         (1.5, "p_o15", "Total OVER 1.5", "Over 1.5 Goles"),
         (2.5, "p_o25", "Total OVER 2.5", "Over 2.5 Goles"),
     ):
         po1, po2 = min(0.92, p1[key_o] + adj_o), min(0.92, p2[key_o] + adj_o)
-        cuota_o = cc.get(f"over{int(ln_o*10)}") or round(max(1.12, 1 / min(0.90, max(0.20, pm[key_o]) * vig_m)), 2)
+        pm_o = pm[key_o]
+        prob_o = _shrink(min(po1, po2), pm_o)
+        cuota_o = cc.get(f"over{int(ln_o*10)}") or round(max(1.12, 1 / min(0.90, max(0.20, pm_o) * vig_m)), 2)
         est_o = f"over{int(ln_o*10)}" not in cc
-        prob_o = min(po1, po2)
+        ev_o = _ev(prob_o, cuota_o)
         sel.append(dict(
             tipo=tipo_o, seleccion=lbl_o, linea_alt=ln_o,
             base1=p1[key_o], base2=p2[key_o], adj=adj_o, motivo=mot_o,
-            p1=po1, p2=po2, prob=prob_o, cuota=cuota_o, cuota_est=est_o,
-            implicita=1 / cuota_o, ventaja=prob_o - 1 / cuota_o,
-            estado=estado_sel("over", linea, cuota_o, est_o, disc=alerta_tot),
+            p1=po1, p2=po2, prob=prob_o, prob_novig=round(pm_o, 4), cuota=cuota_o, cuota_est=est_o,
+            implicita=1 / cuota_o, edge_pp=round(prob_o - pm_o, 4), ventaja=ev_o,
+            ev_ajustado=round(ev_o * w_mod, 4), w_mod=w_mod,
+            estado=estado_sel("over", linea, cuota_o, est_o, disc=alerta_tot, ventaja=ev_o, edge_pp=prob_o - pm_o),
         ))
 
-    # 4. Ambos Marcan (BTTS Sí / No) — cuota anclada al mercado
+    # 4. Ambos Marcan (BTTS Sí / No) — con shrinkage jerárquico y EV real
     btts_si = p1["p_btts"] >= 0.50
     pb1 = p1["p_btts"] if btts_si else (1.0 - p1["p_btts"])
     pb2 = p2["p_btts"] if btts_si else (1.0 - p2["p_btts"])
     pm_btts = pm["p_btts"] if btts_si else (1.0 - pm["p_btts"])
-    prob_btts = min(pb1, pb2)
+    prob_btts = _shrink(min(pb1, pb2), pm_btts)
     cuota_btts = round(max(1.20, 1 / min(0.86, max(0.20, pm_btts) * vig_m)), 2)
+    ev_btts = _ev(prob_btts, cuota_btts)
     sel.append(dict(
         tipo="Ambos Marcan", seleccion="Ambos Marcan — SÍ" if btts_si else "Ambos Marcan — NO",
-        p1=pb1, p2=pb2, prob=prob_btts, cuota=cuota_btts, cuota_est=True,
-        implicita=1 / cuota_btts, ventaja=prob_btts - 1 / cuota_btts,
-        estado=estado_sel("btts", linea, cuota_btts, True),
+        p1=pb1, p2=pb2, prob=prob_btts, prob_novig=round(pm_btts, 4), cuota=cuota_btts, cuota_est=True,
+        implicita=1 / cuota_btts, edge_pp=round(prob_btts - pm_btts, 4),
+        ventaja=ev_btts, ev_ajustado=round(ev_btts * w_mod, 4), w_mod=w_mod,
+        estado=estado_sel("btts", linea, cuota_btts, True, ventaja=ev_btts, edge_pp=prob_btts - pm_btts),
     ))
 
-    # 5. Hándicap Protegido (+1.5 al underdog)
+    # 5. Hándicap Protegido (+1.5 al underdog) — con shrinkage y EV real
     p_dog1 = sum(m1[i][j] for i in range(len(m1)) for j in range(len(m1)) if ((j - i) >= -1 if fav_home else (i - j) >= -1))
     p_dog2 = sum(m2[i][j] for i in range(len(m2)) for j in range(len(m2)) if ((j - i) >= -1 if fav_home else (i - j) >= -1))
+    pm_dog = sum(mm[i][j] for i in range(len(mm)) for j in range(len(mm)) if ((j - i) >= -1 if fav_home else (i - j) >= -1))
     dog_nom = g["away"]["nombre"] if fav_home else g["home"]["nombre"]
-    prob_ah = min(p_dog1, p_dog2)
-    cuota_ah = round(max(1.18, 1 / min(0.86, p_dog1 * 1.05)), 2)
+    prob_ah = _shrink(min(p_dog1, p_dog2), pm_dog)
+    cuota_ah = round(max(1.18, 1 / min(0.86, max(0.20, pm_dog) * vig_m)), 2)
+    ev_ah = _ev(prob_ah, cuota_ah)
     sel.append(dict(
         tipo="Hándicap +1.5", seleccion=f"{dog_nom} +1.5 Goles",
-        p1=p_dog1, p2=p_dog2, prob=prob_ah, cuota=cuota_ah, cuota_est=True,
-        implicita=1 / cuota_ah, ventaja=prob_ah - 1 / cuota_ah,
-        estado=estado_sel("ah", linea, cuota_ah, True),
+        p1=p_dog1, p2=p_dog2, prob=prob_ah, prob_novig=round(pm_dog, 4), cuota=cuota_ah, cuota_est=True,
+        implicita=1 / cuota_ah, edge_pp=round(prob_ah - pm_dog, 4),
+        ventaja=ev_ah, ev_ajustado=round(ev_ah * w_mod, 4), w_mod=w_mod,
+        estado=estado_sel("ah", linea, cuota_ah, True, ventaja=ev_ah, edge_pp=prob_ah - pm_dog),
     ))
 
     return sel, p1, p2
 
 
-def estado_sel(tipo, linea, cuota, cuota_est=False, disc=None, ventaja=None):
+def estado_sel(tipo, linea, cuota, cuota_est=False, disc=None, ventaja=None, edge_pp=None):
     if tipo == "over" and linea <= LOW_LINE:
         return f"BLOQUEADO LÍNEA BAJA (≤{LOW_LINE} goles)"
     if cuota < ODDS_MIN or cuota > ODDS_MAX:
@@ -295,6 +321,8 @@ def estado_sel(tipo, linea, cuota, cuota_est=False, disc=None, ventaja=None):
     av = []
     if disc:
         av.append(disc)
+    if edge_pp is not None and abs(edge_pp) > 0.15:
+        av.append(f"DISCREPANCIA EXTREMA ({edge_pp*100:+.1f} pp)")
     if ventaja is not None and ventaja <= 0:
         av.append(f"sin +EV ({ventaja*100:+.1f}%)")
     return ("AVISO: " + "; ".join(av)) if av else "LUZ VERDE"

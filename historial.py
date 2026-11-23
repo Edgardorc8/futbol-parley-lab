@@ -43,6 +43,10 @@ def _conn():
     cols = {r[1] for r in c.execute("PRAGMA table_info(picks)").fetchall()}
     if "model_version" not in cols:
         c.execute("ALTER TABLE picks ADD COLUMN model_version TEXT DEFAULT 'v1'")
+    if "prob_mercado_novig" not in cols:
+        c.execute("ALTER TABLE picks ADD COLUMN prob_mercado_novig REAL")
+    if "cuota_es_real" not in cols:
+        c.execute("ALTER TABLE picks ADD COLUMN cuota_es_real INTEGER DEFAULT 0")
     c.execute("""CREATE TABLE IF NOT EXISTS odds_snapshots (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         fecha TEXT, game_id TEXT, liga TEXT, partido TEXT, captured_at TEXT,
@@ -126,16 +130,19 @@ def registrar_jornada(fecha, partidos):
                     continue
                 c.execute("""INSERT INTO picks
                     (fecha, game_id, liga, partido, hora, mercado, seleccion, cuota, prob_real,
-                     linea_alt, home_nombre, away_nombre, estado, model_version)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                     linea_alt, home_nombre, away_nombre, estado, model_version, prob_mercado_novig, cuota_es_real)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                     ON CONFLICT(fecha, game_id, mercado) DO UPDATE SET
                       seleccion=excluded.seleccion, cuota=excluded.cuota,
                       prob_real=excluded.prob_real, estado=excluded.estado,
-                      model_version=excluded.model_version
+                      model_version=excluded.model_version,
+                      prob_mercado_novig=excluded.prob_mercado_novig,
+                      cuota_es_real=excluded.cuota_es_real
                     WHERE resultado='PENDIENTE'""",
                     (str(fecha), g["id"], g["liga"], g["partido"], g["hora"], s["tipo"], s["seleccion"],
                      s["cuota"], s["prob"], s.get("linea_alt"), g["home"]["nombre"],
-                     g["away"]["nombre"], s["estado"], MODEL_VERSION))
+                     g["away"]["nombre"], s["estado"], MODEL_VERSION,
+                     s.get("prob_novig"), 0 if s.get("cuota_est", True) else 1))
 
 
 def verificar_resultados():
