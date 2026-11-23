@@ -297,8 +297,6 @@ def estado_sel(tipo, linea, cuota, cuota_est=False, disc=None, ventaja=None):
         av.append(disc)
     if ventaja is not None and ventaja <= 0:
         av.append(f"sin +EV ({ventaja*100:+.1f}%)")
-    if cuota_est:
-        av.append("cuota estimada (cargar casa)")
     return ("AVISO: " + "; ".join(av)) if av else "LUZ VERDE"
 
 
