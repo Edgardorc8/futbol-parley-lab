@@ -121,13 +121,13 @@ def analizar(fecha, log=print):
         if ya_empezo:
             continue
         for s in a["sel"]:
-            if not M.bloqueado(s["estado"]):
+            if not M.bloqueado(s["estado"]) and s["prob"] >= 0.65 and s["ventaja"] > 0:
                 eleg.append(dict(
                     partido=a["g"]["partido"], liga=a["g"]["liga_nombre"], hora=a["g"]["hora"],
                     mercado=s["tipo"], seleccion=s["seleccion"], cuota=s["cuota"],
                     prob=s["prob"], ventaja=s["ventaja"], estado=s["estado"],
                 ))
-    eleg.sort(key=lambda x: -x["prob"])
+    eleg.sort(key=lambda x: -(x["ventaja"] * 0.5 + x["prob"] * 0.5))
     vistos, top = set(), []
     for x in eleg:
         if x["partido"] not in vistos:

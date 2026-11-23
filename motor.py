@@ -6,7 +6,7 @@ RHO_DC = -0.11       # Correlación Dixon-Coles para marcadores bajos (0-0, 1-0,
 LOW_LINE = 2.25      # Candado de línea baja de goles
 DISC_TOTAL = 0.50    # Alerta si modelo difiere > 0.50 goles de la línea de mercado
 ADJ_CAP = 0.03       # Ajuste situacional acotado a ±3%
-ODDS_MIN, ODDS_MAX = 1.15, 2.45
+ODDS_MIN, ODDS_MAX = 1.22, 2.45
 FATIGA_LOCAL = 0.92  # -8% ofensivo si jugó hace <= 3 días
 FATIGA_VISITA = 0.88 # -12% ofensivo si jugó hace <= 3 días
 
@@ -287,7 +287,7 @@ def evaluar_partido(g, proy, cc):
     return sel, p1, p2
 
 
-def estado_sel(tipo, linea, cuota, cuota_est=False, disc=None):
+def estado_sel(tipo, linea, cuota, cuota_est=False, disc=None, ventaja=None):
     if tipo == "over" and linea <= LOW_LINE:
         return f"BLOQUEADO LÍNEA BAJA (≤{LOW_LINE} goles)"
     if cuota < ODDS_MIN or cuota > ODDS_MAX:
@@ -295,6 +295,8 @@ def estado_sel(tipo, linea, cuota, cuota_est=False, disc=None):
     av = []
     if disc:
         av.append(disc)
+    if ventaja is not None and ventaja <= 0:
+        av.append(f"sin +EV ({ventaja*100:+.1f}%)")
     if cuota_est:
         av.append("cuota estimada (cargar casa)")
     return ("AVISO: " + "; ".join(av)) if av else "LUZ VERDE"
