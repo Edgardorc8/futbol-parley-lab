@@ -70,23 +70,45 @@ def analizar(fecha, log=print):
     if changed_odds:
         odds_file.write_text(json.dumps(saved_odds), encoding="utf-8")
 
-    # Descargar tablas y L5 en paralelo para carga rápida (~3s)
+    # Descargar tablas (incluyendo las 5 grandes ligas si hay UCL/UEL para cruce doméstico) y L5 en paralelo
+    TOP5 = ("eng.1", "esp.1", "ita.1", "ger.1", "fra.1")
     ligas_unicas = list({g["liga"] for g in juegos})
+    hay_uefa = any(s in ("uefa.champions", "uefa.europa") for s in ligas_unicas)
+    ligas_tablas = list(set(ligas_unicas) | (set(TOP5) if hay_uefa else set()))
     pares_l5 = list({(g["liga"], g[s]["id"]) for g in juegos for s in ("home", "away")})
     with ThreadPoolExecutor(max_workers=10) as ex:
-        fut_tab = {slug: ex.submit(F.tabla_liga, slug) for slug in ligas_unicas}
+        fut_tab = {slug: ex.submit(F.tabla_liga, slug) for slug in ligas_tablas}
         fut_l5 = {par: ex.submit(F.ultimos5, par[0], par[1]) for par in pares_l5}
         fut_pl = {par: ex.submit(F.plantilla, par[0], par[1]) for par in pares_l5}
         tablas = {slug: f.result() for slug, f in fut_tab.items()}
         l5_map = {par: f.result() for par, f in fut_l5.items()}
         pl_map = {par: f.result() for par, f in fut_pl.items()}
 
+    # Mapa doméstico Top-5 para evitar sesgo de muestra corta (4-5 PJ) en Champions/Europa League
+    dom_map = {}
+    if hay_uefa:
+        for s_dom in TOP5:
+            dom_map.update(tablas.get(s_dom, ({}, {}))[0])
+
+    def _stats_combinadas(slug, tid, eq_map):
+        st = eq_map.get(tid, {})
+        if slug in ("uefa.champions", "uefa.europa") and tid in dom_map:
+            dm = dom_map[tid]
+            if st and st.get("pj", 0) >= 2:
+                return dict(
+                    dm,
+                    gf_pg=round(0.70 * dm["gf_pg"] + 0.30 * st["gf_pg"], 2),
+                    gc_pg=round(0.70 * dm["gc_pg"] + 0.30 * st["gc_pg"], 2),
+                )
+            return dm
+        return st
+
     analisis = []
     for g in juegos:
         slug = g["liga"]
         eq_map, lg = tablas[slug]
-        sh = eq_map.get(g["home"]["id"], {})
-        sa = eq_map.get(g["away"]["id"], {})
+        sh = _stats_combinadas(slug, g["home"]["id"], eq_map)
+        sa = _stats_combinadas(slug, g["away"]["id"], eq_map)
         l5h = l5_map.get((slug, g["home"]["id"]), [])
         l5a = l5_map.get((slug, g["away"]["id"]), [])
         pl_h = pl_map.get((slug, g["home"]["id"]), [])
