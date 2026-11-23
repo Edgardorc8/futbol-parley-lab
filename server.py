@@ -71,7 +71,10 @@ def api_get_tickets():
 
 @app.post("/api/tickets")
 def api_post_ticket(datos: dict = Body(...)):
-    return dict(ok=True, id=H.guardar_ticket(datos))
+    try:
+        return dict(ok=True, id=H.guardar_ticket(datos))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
 
 @app.patch("/api/tickets/{tid}")

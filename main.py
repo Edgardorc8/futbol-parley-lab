@@ -168,7 +168,32 @@ def analizar(fecha, log=print):
         if len(top) == 4:
             break
 
-    return dict(fecha=str(fecha), partidos=analisis, top_parley=top)
+    def _combo(patas, k_mult):
+        if not patas:
+            return None
+        cuo = 1.0
+        pr_raw = 1.0
+        for p in patas:
+            cuo *= p["cuota"]
+            pr_raw *= p["prob"]
+        corr = 0.92 ** max(0, len(patas) - 1)
+        pr_adj = pr_raw * corr
+        ev_c = pr_adj * cuo - 1.0
+        kelly = max(0.0, min(0.05, (ev_c / max(0.01, cuo - 1.0)) * k_mult)) if ev_c > 0 else 0.0
+        return dict(
+            patas=patas, cuota=round(cuo, 2), prob_raw=round(pr_raw, 4),
+            prob_adj=round(pr_adj, 4), ev=round(ev_c, 4),
+            kelly_mult=k_mult, stake_pct=round(kelly * 100, 2),
+        )
+
+    menu_apuestas = dict(
+        fijas=top[:3],
+        dobles=_combo(top[:2], 0.15) if len(top) >= 2 else None,
+        triples=_combo(top[:3], 0.05) if len(top) >= 3 else None,
+        cuadruples=_combo(top[:4], 0.02) if len(top) >= 4 else None,
+    )
+
+    return dict(fecha=str(fecha), partidos=analisis, top_parley=top, menu_apuestas=menu_apuestas)
 
 
 def generar(fecha, log=print):

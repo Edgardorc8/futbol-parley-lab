@@ -75,8 +75,20 @@ def _conn():
     return c
 
 
+def exposicion_diaria(fecha: str) -> float:
+    with _conn() as c:
+        v = c.execute("SELECT COALESCE(SUM(stake), 0) FROM tickets WHERE fecha=?", (fecha,)).fetchone()[0]
+    return round(float(v or 0.0), 2)
+
+
 def guardar_ticket(data: dict):
     stake = float(data.get("stake") or 10.0)
+    bankroll = float(data.get("bankroll") or 0.0)
+    if bankroll > 0:
+        exp_actual = exposicion_diaria(data["fecha"])
+        limite = round(bankroll * 0.05, 2)
+        if exp_actual + stake > limite + 0.01:
+            raise ValueError(f"Cap diario 5% excedido: ya llevas ${exp_actual:.2f} hoy (máx ${limite:.2f} de banca ${bankroll:.0f}).")
     cuota = float(data.get("cuota_total") or 1.0)
     prob = float(data.get("prob_conjunta") or 0.0)
     res = (data.get("resultado") or "PENDIENTE").upper()

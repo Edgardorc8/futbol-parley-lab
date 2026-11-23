@@ -174,27 +174,53 @@
         </table>` : '<p class="mut">Sin partidos próximos en esta categoría. Prueba <b>📅 Mañana</b>.</p>'}</div>`;
       };
 
-      $("v-res").innerHTML = `
-        <div class="card hero">
-          <h2>🎯 Combinado Corto de Élite (Solo mercados rentables + LUZ VERDE · Máx. 4 Patas) <span class="tag ok">${top.length} patas</span></h2>
-          ${top.length ? `<table>
-            <thead><tr><th>Ticket</th><th>Hora VET</th><th>Liga</th><th>Partido</th><th>Mercado</th><th>Apostar</th><th>Cuota</th><th>Prob. Real</th><th>Estado</th></tr></thead>
-            <tbody>${rowsTop}</tbody>
-          </table>
+      const menu = DATA.menu_apuestas || {};
+      const fijas = (menu.fijas || []).filter(x => !mapG[x.partido] || !jugado(mapG[x.partido]));
+      const renderComboCard = (titulo, color, badge, obj) => {
+        if (!obj || !obj.patas || !obj.patas.length) {
+          return `<div class="card" style="border-left-color:${color}"><h3>${titulo} <span class="tag warn">${badge}</span></h3><p class="mut">Sin suficientes picks con cuota real +EV hoy.</p></div>`;
+        }
+        return `<div class="card" style="border-left-color:${color}">
+          <h3>${titulo} <span class="tag warn">${badge}</span></h3>
+          <table><thead><tr><th>✓</th><th>Partido</th><th>Selección</th><th>Cuota</th><th>Prob.</th></tr></thead>
+          <tbody>${obj.patas.map(x => {
+            const g = mapG[x.partido], pid = x.id || (g ? `${g.id}|${x.mercado}` : "");
+            return `<tr><td><input type="checkbox" ${x.cuota_est ? "disabled title='Cuota estimada ⚠️'" : ""} ${PICKS.has(pid) ? "checked" : ""} onchange="PICKS.has('${pid}')?PICKS.delete('${pid}'):PICKS.add('${pid}');renderRanking();renderParley()"></td>
+              <td>${g ? mLogo(g) : `<b>${x.partido}</b>`}<div class="mut">${x.hora} · ${x.liga}</div></td>
+              <td><b>${x.seleccion}</b></td><td>${x.cuota.toFixed(2)}</td><td class="pos">${pct(x.prob)}</td></tr>`;
+          }).join("")}</tbody></table>
           <div class="kpi">
-            <div><span class="mut">Cuota combinada</span><b>${cuotaComb.toFixed(2)}</b></div>
-            <div><span class="mut">Prob. conjunta real</span><b class="pos">${pct(probComb)}</b></div>
-            <div><span class="mut">Exigencia cuota</span><b>${pct(1 / cuotaComb)}</b></div>
-          </div>` : `<p class="mut">Los partidos de ${DATA.fecha} ya finalizaron o están en juego. <button onclick="irManana()" style="margin-left:8px">📅 Ver partidos de Mañana</button></p>`}
+            <div><span class="mut">Cuota</span><b>${obj.cuota.toFixed(2)}</b></div>
+            <div><span class="mut">Prob. Adj.</span><b class="pos">${pct(obj.prob_adj)}</b></div>
+            <div><span class="mut">EV Real</span><b class="${obj.ev > 0 ? 'pos' : 'neg'}">${(obj.ev * 100).toFixed(1)}%</b></div>
+            <div><span class="mut">Stake (${obj.kelly_mult}x Kelly)</span><b>${obj.stake_pct}% banca</b></div>
+          </div>
+        </div>`;
+      };
+
+      const fijasCard = `<div class="card" style="border-left-color:#10b981">
+        <h3>🟢 Fijas — Riesgo Bajo <span class="tag ok">0.25x Kelly</span></h3>
+        ${fijas.length ? `<table><thead><tr><th>✓</th><th>Hora</th><th>Partido</th><th>Selección</th><th>Cuota</th><th>Prob.</th></tr></thead>
+        <tbody>${fijas.map(x => {
+          const g = mapG[x.partido], pid = x.id || (g ? `${g.id}|${x.mercado}` : "");
+          return `<tr><td><input type="checkbox" ${x.cuota_est ? "disabled title='Cuota estimada ⚠️'" : ""} ${PICKS.has(pid) ? "checked" : ""} onchange="PICKS.has('${pid}')?PICKS.delete('${pid}'):PICKS.add('${pid}');renderRanking();renderParley()"></td>
+            <td>${x.hora}</td><td>${g ? mLogo(g) : `<b>${x.partido}</b>`}</td>
+            <td><b>${x.seleccion}</b></td><td>${x.cuota.toFixed(2)}</td><td class="pos">${pct(x.prob)}</td></tr>`;
+        }).join("")}</tbody></table>` : `<p class="mut">Sin fijas con cuota real +EV hoy. Revisa <b>📅 Mañana</b> o carga cuotas en <b>⚙️ Cuotas Casa</b>.</p>`}
+      </div>`;
+
+      $("v-res").innerHTML = `
+        <div class="grid" style="margin-bottom:16px">
+          ${fijasCard}
+          ${renderComboCard("🟡 Dobles — Riesgo Medio", "#eab308", "0.15x Kelly", menu.dobles)}
+          ${renderComboCard("🟠 Triples — Riesgo Alto", "#f97316", "⚠️ Stake Reducido (0.05x)", menu.triples)}
+          ${renderComboCard("🔴 Cuádruples — Riesgo Muy Alto", "#ef4444", "⚠️ Stake Mínimo (0.02x)", menu.cuadruples)}
         </div>
         <div class="grid3">
           ${topCat("Doble Oportunidad", "Top Doble Oportunidad (1X / X2)", "🛡️")}
-          ${topCat("Total OVER 2.5", "Top Over 2.5 Goles", "🔥")}
-          ${topCat("Total UNDER 2.5", "Top Under 2.5 Goles", "🧊")}
-          ${topCat("Total UNDER 3.5", "Top Under 3.5 Goles (Protegido)", "🔽")}
-          ${topCat("Total OVER 1.5", "Top Over 1.5 Goles (Protegido)", "🔼")}
           ${topCat("Ambos Marcan", "Top Ambos Marcan (BTTS)", "⚡")}
-          ${topCat("Hándicap +1.5", "Top Hándicap Protegido (+1.5)", "⚖️")}
+          ${topCat("Total OVER 1.5", "Top Over 1.5 Goles (Observación)", "🔼")}
+          ${topCat("Total UNDER 2.5", "Top Under 2.5 Goles (Observación)", "🧊")}
         </div>`;
     }
 
@@ -323,7 +349,8 @@
       const prob = probRaw * corrPen;
       const bk = parseFloat(localStorage.getItem("fut_bankroll") || "100");
       const ev = prob * cuota - 1;
-      const kellyQ = ev > 0 ? Math.min(0.05, (ev / (cuota - 1)) * 0.25) : 0;
+      const kMult = sel.length <= 1 ? 0.25 : sel.length === 2 ? 0.15 : sel.length === 3 ? 0.05 : 0.02;
+      const kellyQ = ev > 0 ? Math.min(0.05, (ev / Math.max(0.01, cuota - 1)) * kMult) : 0;
       const stake = bk * kellyQ;
       const errores = validarParley(sel, cuota, prob);
 
@@ -360,11 +387,13 @@
       if (!sel.length) return;
       const cuota = sel.reduce((c, x) => c * x.s.cuota, 1);
       const prob = sel.reduce((p, x) => p * x.s.prob, 1);
-      await fetch("/api/tickets", {
+      const bk = parseFloat(localStorage.getItem("fut_bankroll") || "100");
+      const r = await fetch("/api/tickets", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           fecha: DATA.fecha,
+          bankroll: bk,
           stake: parseFloat($("tk-stake").value) || 10,
           cuota_total: +cuota.toFixed(3),
           prob_conjunta: +prob.toFixed(4),
@@ -372,6 +401,11 @@
           patas: sel.map(x => ({ hora: x.a.g.hora, partido: x.a.g.partido, mercado: x.s.tipo, seleccion: x.s.seleccion, cuota: x.s.cuota })),
         }),
       });
+      if (!r.ok) {
+        const err = await r.json();
+        alert("⚠️ " + (err.detail || "No se pudo guardar el ticket."));
+        return;
+      }
       PICKS.clear();
       renderRanking();
       renderParley();
