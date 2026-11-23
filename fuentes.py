@@ -400,3 +400,87 @@ def obtener_cuotas_reales(juegos):
         if cuo:
             out[g["partido"]] = cuo
     return out
+
+
+# ---------------- Bzzoiro Sports Data (BSD) ----------------
+def _bzzoiro_key():
+    k = os.environ.get("BZZOIRO_API_KEY", "").strip()
+    if k:
+        return k
+    env_p = Path(__file__).parent / ".env"
+    if env_p.exists():
+        for ln in env_p.read_text(encoding="utf-8").splitlines():
+            if ln.strip().startswith("BZZOIRO_API_KEY="):
+                return ln.split("=", 1)[1].strip().strip('"').strip("'")
+    return ""
+
+
+def obtener_cuotas_bzzoiro(fecha, juegos):
+    """Obtiene cuotas reales 2-way (1X2, O/U 1.5/2.5/3.5, BTTS, DO derivada) desde Bzzoiro Sports Data."""
+    key = _bzzoiro_key()
+    if not key or not juegos:
+        return {}
+    cache_p = CACHE / f"bzzoiro_{fecha:%Y%m%d}.json"
+    evs = []
+    if cache_p.exists() and time.time() - cache_p.stat().st_mtime < 3600:
+        try:
+            evs = json.loads(cache_p.read_text(encoding="utf-8"))
+        except Exception:
+            evs = []
+    else:
+        f_prev = (fecha - dt.timedelta(days=1)).isoformat()
+        f_next = (fecha + dt.timedelta(days=1)).isoformat()
+        url = f"https://sports.bzzoiro.com/api/events/?date_from={f_prev}&date_to={f_next}"
+        hdrs = {"Authorization": f"Token {key}", "User-Agent": UA["User-Agent"]}
+        try:
+            pages = 0
+            while url and pages < 6:
+                req = urllib.request.Request(url, headers=hdrs)
+                with urllib.request.urlopen(req, timeout=20) as resp:
+                    d = json.loads(resp.read().decode("utf-8"))
+                evs.extend(d.get("results", d if isinstance(d, list) else []))
+                url = d.get("next") if isinstance(d, dict) else None
+                pages += 1
+            cache_p.write_text(json.dumps(evs, ensure_ascii=False), encoding="utf-8")
+        except Exception as e:
+            print(f"[Bzzoiro API] Fallback por error: {e}")
+            if cache_p.exists():
+                evs = json.loads(cache_p.read_text(encoding="utf-8"))
+            else:
+                return {}
+
+    alias = _cargar_alias()
+    out = {}
+    for g in juegos:
+        ev = _match_evento(g, evs, alias)
+        if not ev:
+            continue
+        cuo = {}
+        def _put(k_dest, k_src):
+            v = ev.get(k_src)
+            if v is not None:
+                try:
+                    fv = float(v)
+                    if fv > 1.0:
+                        cuo[k_dest] = round(fv, 2)
+                except (TypeError, ValueError):
+                    pass
+
+        _put("ml_local", "odds_home")
+        _put("ml_empate", "odds_draw")
+        _put("ml_visita", "odds_away")
+        _put("over15", "odds_over_15")
+        _put("under15", "odds_under_15")
+        _put("over25", "odds_over_25")
+        _put("under25", "odds_under_25")
+        _put("over35", "odds_over_35")
+        _put("under35", "odds_under_35")
+        _put("btts_si", "odds_btts_yes")
+        _put("btts_no", "odds_btts_no")
+        if cuo.get("ml_local") and cuo.get("ml_empate"):
+            cuo["dc_1x"] = round((cuo["ml_local"] * cuo["ml_empate"]) / (cuo["ml_local"] + cuo["ml_empate"]), 2)
+        if cuo.get("ml_visita") and cuo.get("ml_empate"):
+            cuo["dc_x2"] = round((cuo["ml_visita"] * cuo["ml_empate"]) / (cuo["ml_visita"] + cuo["ml_empate"]), 2)
+        if cuo:
+            out[g["partido"]] = cuo
+    return out
