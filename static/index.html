@@ -388,8 +388,8 @@
             <div><span class="mut">% Acierto</span><b class="pos">${pct(h.acierto)}</b></div>
             <div><span class="mut">ROI</span><b class="${(h.roi || 0) >= 0 ? 'pos' : 'neg'}">${pct(h.roi)}</b></div>
             <div><span class="mut">Beneficio</span><b>${h.beneficio_u >= 0 ? '+' : ''}${h.beneficio_u} u</b></div>
-            <div><span class="mut">Brier Score</span><b>${h.brier != null ? h.brier.toFixed(3) : '—'}</b></div>
-            <div><span class="mut">Log-Loss</span><b>${h.log_loss != null ? h.log_loss.toFixed(3) : '—'}</b></div>
+            <div><span class="mut">Max Drawdown</span><b class="neg">-${(h.max_dd_u || 0).toFixed(2)} u</b></div>
+            <div><span class="mut">Brier / Log-Loss</span><b>${h.brier != null ? h.brier.toFixed(3) : '—'} / ${h.log_loss != null ? h.log_loss.toFixed(3) : '—'}</b></div>
           </div>
         </div>
         ${(h.calibracion || []).length ? `<div class="card" style="margin-bottom:14px">
@@ -399,11 +399,12 @@
         </div>` : ''}
         ${(h.por_mercado || []).length ? `<div class="card" style="margin-bottom:14px">
           <h3>🔬 Diagnóstico del Modelo por Mercado</h3>
-          <table><thead><tr><th>Mercado</th><th>G/P/Pend</th><th>Prob. Modelo</th><th>% Real</th><th>Sesgo</th><th>ROI</th></tr></thead>
+          <table><thead><tr><th>Mercado</th><th>G/P/Pend</th><th>Prob. Modelo</th><th>% Real</th><th>Sesgo</th><th>ROI</th><th>Muestra</th></tr></thead>
           <tbody>${h.por_mercado.map(m => `<tr><td><b>${m.mercado}</b></td><td>${m.ganadas}/${m.perdidas}/${m.pendientes}</td>
             <td>${m.prob_esperada != null ? pct(m.prob_esperada) : '—'}</td><td><b>${m.acierto != null ? pct(m.acierto) : '—'}</b></td>
             <td class="${(m.sesgo || 0) >= 0 ? 'pos' : 'neg'}">${m.sesgo != null ? (m.sesgo >= 0 ? '+' : '') + (m.sesgo * 100).toFixed(1) + '%' : '—'}</td>
-            <td class="${(m.roi || 0) >= 0 ? 'pos' : 'neg'}">${m.roi != null ? (m.roi * 100).toFixed(1) + '%' : '—'}</td></tr>`).join('')}</tbody></table>
+            <td class="${(m.roi || 0) >= 0 ? 'pos' : 'neg'}">${m.roi != null ? (m.roi * 100).toFixed(1) + '%' : '—'}</td>
+            <td><span class="tag ${(m.dec || 0) >= 100 ? 'ok' : (m.dec || 0) >= 30 ? 'warn' : 'bad'}">${m.muestra || m.dec || 0}</span></td></tr>`).join('')}</tbody></table>
         </div>` : ''}
         <div class="card" style="margin-bottom:14px">
           <h3>
