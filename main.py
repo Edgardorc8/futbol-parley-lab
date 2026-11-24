@@ -148,7 +148,7 @@ def analizar(fecha, log=print):
             continue
         for s in a["sel"]:
             s["bloqueado_por_cuota_est"] = bool(s.get("cuota_est", False))
-            if not M.bloqueado(s["estado"]) and not s["bloqueado_por_cuota_est"] and "DISCREPANCIA EXTREMA" not in s["estado"] and s["tipo"] in MERCADOS_ELITE and s["prob"] >= 0.65 and s["ventaja"] > 0:
+            if not M.bloqueado(s["estado"]) and not s["bloqueado_por_cuota_est"] and "DISCREPANCIA EXTREMA" not in s["estado"] and s["tipo"] in MERCADOS_ELITE and s["prob"] >= 0.50 and s["ventaja"] > 0:
                 eleg.append(dict(
                     id=f"{a['g']['id']}|{s['tipo']}", liga_slug=a["g"]["liga"],
                     partido=a["g"]["partido"], liga=a["g"]["liga_nombre"], hora=a["g"]["hora"],
@@ -157,10 +157,12 @@ def analizar(fecha, log=print):
                     cuota_est=s.get("cuota_est", False), estado=s["estado"],
                 ))
     eleg.sort(key=lambda x: (0 if x["estado"].startswith("LUZ") else 1, -x["ev_ajustado"]))
+    solo_uefa = all(g["liga"] in ("uefa.champions", "uefa.europa") for g in juegos)
+    max_uefa = 3 if solo_uefa else 2
     vistos, top, uefa_cnt = set(), [], 0
     for x in eleg:
         es_uefa = x["liga_slug"] in ("uefa.champions", "uefa.europa")
-        if x["partido"] not in vistos and (not es_uefa or uefa_cnt < 2):
+        if x["partido"] not in vistos and (not es_uefa or uefa_cnt < max_uefa):
             vistos.add(x["partido"])
             if es_uefa:
                 uefa_cnt += 1
