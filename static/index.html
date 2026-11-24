@@ -297,7 +297,7 @@
       const prox = partidosFiltrados().filter(a => !jugado(a.g));
       const todas = prox.flatMap(a => a.sel.map(s => ({ a, s, id: a.g.id + "|" + s.tipo })));
       todas.sort((x, y) => (bloq(x.s.estado) - bloq(y.s.estado)) || ((y.s.ev_ajustado ?? y.s.ventaja) - (x.s.ev_ajustado ?? x.s.ventaja)));
-      const tipos = ["TODOS", "Doble Oportunidad", "Ambos Marcan", "Total OVER 1.5", "Total UNDER 2.5", "Ganador (2 Goles)"];
+      const tipos = ["TODOS", "Doble Oportunidad", "Ambos Marcan", "Total OVER 2.5", "Total UNDER 2.5", "Total OVER 1.5", "Total UNDER 3.5", "Ganador (2 Goles)", "Hándicap +1.5"];
       const lista = RK_FILTRO === "TODOS" ? todas : todas.filter(x => x.s.tipo === RK_FILTRO);
       $("v-rk").innerHTML = `
         <div class="pills">${tipos.map(t => `<button class="${RK_FILTRO === t ? 'on' : ''}" onclick="RK_FILTRO='${t}';renderRanking()">${t}</button>`).join("")}</div>
