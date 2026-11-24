@@ -255,7 +255,7 @@
           return `<tr><td><input type="checkbox" ${x.cuota_est ? "disabled title='⚠️ Cuota estimada'" : ""} ${PICKS.has(pid) ? "checked" : ""} onchange="togglePick('${pid}')"></td>
             <td>${x.hora}</td><td>${g ? mLogo(g) : `<b>${x.partido}</b>`}</td>
             <td><b>${x.seleccion}</b></td><td>${x.cuota.toFixed(2)}</td><td class="pos">${pct(x.prob)}</td></tr>`;
-        }).join("")}</tbody></table>` : `<p class="mut">Sin fijas +EV hoy. Prueba <b>📅 Mañana</b>.</p>`}
+        }).join("")}</tbody></table>` : `<p class="mut">${menu.mensaje_fijas || "Sin fijas +EV hoy. Prueba <b>📅 Mañana</b>."}</p>`}
       </div>`;
 
       // Partidos horizontales con checkboxes para armador manual

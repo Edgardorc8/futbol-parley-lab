@@ -134,6 +134,7 @@ def analizar(fecha, log=print):
     MERCADOS_ELITE = {"Doble Oportunidad", "Ambos Marcan"}
     ahora_utc = dt.datetime.now(dt.timezone.utc)
     eleg = []
+    descartados_ev = 0
     for a in analisis:
         est_g = (a["g"].get("estado") or "").lower()
         ini_iso = a["g"].get("inicio_iso")
@@ -156,6 +157,8 @@ def analizar(fecha, log=print):
                     prob=s["prob"], ventaja=s["ventaja"], ev_ajustado=s.get("ev_ajustado", s["ventaja"]),
                     cuota_est=s.get("cuota_est", False), estado=s["estado"],
                 ))
+            elif not s["bloqueado_por_cuota_est"] and s["ventaja"] >= M.MIN_EV:
+                descartados_ev += 1
     eleg.sort(key=lambda x: (0 if x["estado"].startswith("LUZ") else 1, -x["ev_ajustado"]))
     solo_uefa = all(g["liga"] in ("uefa.champions", "uefa.europa") for g in juegos)
     max_uefa = 3 if solo_uefa else 2
@@ -192,8 +195,14 @@ def analizar(fecha, log=print):
     tri_patas = unicos[2:5] if len(unicos) >= 5 else (unicos[:3] if len(unicos) >= 3 else [])
     cua_patas = unicos[:4] if len(unicos) >= 4 else []
 
+    msg_fijas = (
+        f"Hoy hay {descartados_ev} picks con +EV real, pero no cumplen los filtros de seguridad de Fijas (prob >= 50%, muestra o mercado élite). Revisa la lista manual abajo."
+        if descartados_ev > 0 else "Sin picks con +EV real (>= 2%) para esta fecha."
+    )
     menu_apuestas = dict(
         total_disponibles=len(unicos),
+        descartados_ev=descartados_ev,
+        mensaje_fijas=msg_fijas,
         fijas=unicos[:3],
         dobles=_combo(dob_patas, 0.15) if dob_patas else None,
         triples=_combo(tri_patas, 0.05) if tri_patas else None,

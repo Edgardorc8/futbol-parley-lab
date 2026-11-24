@@ -6,7 +6,7 @@ RHO_DC = -0.11       # Correlación Dixon-Coles para marcadores bajos (0-0, 1-0,
 LOW_LINE = 2.25      # Candado de línea baja de goles
 DISC_TOTAL = 0.50    # Alerta si modelo difiere > 0.50 goles de la línea de mercado
 ADJ_CAP = 0.03       # Ajuste situacional acotado a ±3%
-ODDS_MIN, ODDS_MAX = 1.22, 2.45
+ODDS_MIN, ODDS_MAX = 1.22, 6.00
 MIN_EV = 0.02        # Filtro de ruido: exigir EV >= +2.0% para asignar stake
 FATIGA_LOCAL = 0.92  # -8% ofensivo si jugó hace <= 3 días
 FATIGA_VISITA = 0.88 # -12% ofensivo si jugó hace <= 3 días
