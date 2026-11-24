@@ -148,7 +148,7 @@ def analizar(fecha, log=print):
             continue
         for s in a["sel"]:
             s["bloqueado_por_cuota_est"] = bool(s.get("cuota_est", False))
-            if not M.bloqueado(s["estado"]) and not s["bloqueado_por_cuota_est"] and "DISCREPANCIA EXTREMA" not in s["estado"] and s["tipo"] in MERCADOS_ELITE and s["prob"] >= 0.50 and s["ventaja"] > 0:
+            if not M.bloqueado(s["estado"]) and not s["bloqueado_por_cuota_est"] and "DISCREPANCIA EXTREMA" not in s["estado"] and s["tipo"] in MERCADOS_ELITE and s["prob"] >= 0.50 and s["ventaja"] >= M.MIN_EV:
                 eleg.append(dict(
                     id=f"{a['g']['id']}|{s['tipo']}", liga_slug=a["g"]["liga"],
                     partido=a["g"]["partido"], liga=a["g"]["liga_nombre"], hora=a["g"]["hora"],

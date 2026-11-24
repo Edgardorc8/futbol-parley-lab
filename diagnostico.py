@@ -8,6 +8,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 import fuentes as F
 import main as P
+import motor as M
 
 
 def generar_diagnostico(fecha):
@@ -25,9 +26,12 @@ def generar_diagnostico(fecha):
             w = s.get("w_mod")
             p_fin = round(float(s["prob"]), 4)
             ev = round(p_fin * cuota - 1.0, 4)
-            # Tarea 1: Si cuota_est=True -> Kelly y Stake forzados a 0.00%
-            if es_est or ev <= 0 or cuota <= 1.0:
+            # Tarea 1 y 2: cuota_est=True o EV < MIN_EV (2%) -> Kelly y Stake forzados a 0.00%
+            est_txt = s["estado"]
+            if es_est or ev < M.MIN_EV or cuota <= 1.0:
                 kelly_full, stake_raw = 0.0, 0.0
+                if not es_est and 0 < ev < M.MIN_EV:
+                    est_txt = "DESCARTADO_POR_EV_BAJO"
             else:
                 kelly_full = round(ev / (cuota - 1.0), 4)
                 stake_raw = round(min(0.05, kelly_full * 0.25) * 100, 2)
@@ -47,9 +51,27 @@ def generar_diagnostico(fecha):
                 ev_real=ev,
                 kelly_full_pct=round(kelly_full * 100, 2),
                 stake_025_pct=stake_raw,
-                estado=s["estado"],
+                estado=est_txt,
             ))
-    # Tarea 2: Cap diario global del 5.00% de la banca sobre la suma de todos los stakes
+
+    # Filtro estricto de correlación: máximo 1 pick con stake por partido (conserva el de mayor EV)
+    mejor_por_partido = {}
+    for idx, r in enumerate(filas):
+        if r["stake_025_pct"] > 0:
+            p_key = r["partido"]
+            if p_key not in mejor_por_partido or r["ev_real"] > filas[mejor_por_partido[p_key]]["ev_real"]:
+                if p_key in mejor_por_partido:
+                    prev = filas[mejor_por_partido[p_key]]
+                    prev["stake_025_pct"] = 0.0
+                    prev["kelly_full_pct"] = 0.0
+                    prev["estado"] = "DESCARTADO_CORRELACION_PARTIDO"
+                mejor_por_partido[p_key] = idx
+            else:
+                r["stake_025_pct"] = 0.0
+                r["kelly_full_pct"] = 0.0
+                r["estado"] = "DESCARTADO_CORRELACION_PARTIDO"
+
+    # Cap diario global del 5.00% de la banca sobre la suma de todos los stakes activos
     tot_stk = sum(r["stake_025_pct"] for r in filas)
     if tot_stk > 5.0:
         escala = 5.0 / tot_stk
