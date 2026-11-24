@@ -191,6 +191,20 @@ def evaluar_partido(g, proy, cc, n_muestra=10):
     def _ev(p_real, cuota):
         return round(p_real * cuota - 1.0, 4)
 
+    def _devig2(o_a, o_b, fallback):
+        if o_a and o_b and o_a > 1.0 and o_b > 1.0:
+            ia, ib = 1.0 / o_a, 1.0 / o_b
+            lo, hi = 1.0, 3.0
+            for _ in range(30):
+                mid = (lo + hi) / 2
+                if (ia ** mid + ib ** mid) > 1.0:
+                    lo = mid
+                else:
+                    hi = mid
+            k = (lo + hi) / 2
+            return round(ia ** k, 4)
+        return fallback
+
     sel = []
 
     # 1. Lado Protegido: Doble Oportunidad (1X o X2) o Ganador Pago Anticipado 2G
@@ -236,17 +250,18 @@ def evaluar_partido(g, proy, cc, n_muestra=10):
             estado=estado_sel("lado", linea, cuota_dc, est_dc, ventaja=ev_dc, edge_pp=prob_dc - pm_dc), vig=vig,
         ))
 
-    # 2. Totales UNDER (Under 3.5 Protegido + Under 2.5 Estándar) — con shrinkage y EV real
+    # 2. Totales UNDER (Under 3.5 Protegido + Under 2.5 Estándar) — con devig 2-way real
     adj_u, mot_u = ajuste_situacional("under", proy, linea)
     for ln_u, key_u, tipo_u, lbl_u in (
         (3.5, "p_u35", "Total UNDER 3.5", "Under 3.5 Goles"),
         (2.5, "p_u25", "Total UNDER 2.5", "Under 2.5 Goles"),
     ):
         pu1, pu2 = min(0.92, p1[key_u] + adj_u), min(0.92, p2[key_u] + adj_u)
-        pm_u = pm[key_u]
+        suf = int(ln_u * 10)
+        pm_u = _devig2(cc.get(f"under{suf}"), cc.get(f"over{suf}"), pm[key_u])
         prob_u = _shrink(min(pu1, pu2), pm_u)
-        cuota_u = cc.get(f"under{int(ln_u*10)}") or round(max(1.12, 1 / min(0.90, max(0.20, pm_u) * vig_m)), 2)
-        est_u = f"under{int(ln_u*10)}" not in cc
+        cuota_u = cc.get(f"under{suf}") or round(max(1.12, 1 / min(0.90, max(0.20, pm_u) * vig_m)), 2)
+        est_u = f"under{suf}" not in cc
         ev_u = _ev(prob_u, cuota_u)
         sel.append(dict(
             tipo=tipo_u, seleccion=lbl_u, linea_alt=ln_u,
@@ -257,17 +272,18 @@ def evaluar_partido(g, proy, cc, n_muestra=10):
             estado=estado_sel("under", linea, cuota_u, est_u, disc=alerta_tot, ventaja=ev_u, edge_pp=prob_u - pm_u),
         ))
 
-    # 3. Totales OVER (Over 1.5 Protegido + Over 2.5 Estándar) — con shrinkage y EV real
+    # 3. Totales OVER (Over 1.5 Protegido + Over 2.5 Estándar) — con devig 2-way real
     adj_o, mot_o = ajuste_situacional("over", proy, linea)
     for ln_o, key_o, tipo_o, lbl_o in (
         (1.5, "p_o15", "Total OVER 1.5", "Over 1.5 Goles"),
         (2.5, "p_o25", "Total OVER 2.5", "Over 2.5 Goles"),
     ):
         po1, po2 = min(0.92, p1[key_o] + adj_o), min(0.92, p2[key_o] + adj_o)
-        pm_o = pm[key_o]
+        suf = int(ln_o * 10)
+        pm_o = _devig2(cc.get(f"over{suf}"), cc.get(f"under{suf}"), pm[key_o])
         prob_o = _shrink(min(po1, po2), pm_o)
-        cuota_o = cc.get(f"over{int(ln_o*10)}") or round(max(1.12, 1 / min(0.90, max(0.20, pm_o) * vig_m)), 2)
-        est_o = f"over{int(ln_o*10)}" not in cc
+        cuota_o = cc.get(f"over{suf}") or round(max(1.12, 1 / min(0.90, max(0.20, pm_o) * vig_m)), 2)
+        est_o = f"over{suf}" not in cc
         ev_o = _ev(prob_o, cuota_o)
         sel.append(dict(
             tipo=tipo_o, seleccion=lbl_o, linea_alt=ln_o,
@@ -278,11 +294,12 @@ def evaluar_partido(g, proy, cc, n_muestra=10):
             estado=estado_sel("over", linea, cuota_o, est_o, disc=alerta_tot, ventaja=ev_o, edge_pp=prob_o - pm_o),
         ))
 
-    # 4. Ambos Marcan (BTTS Sí / No) — usa cuota real de The Odds API / CSV si existe
+    # 4. Ambos Marcan (BTTS Sí / No) — con devig 2-way real de Bzzoiro / The Odds API
     btts_si = p1["p_btts"] >= 0.50
     pb1 = p1["p_btts"] if btts_si else (1.0 - p1["p_btts"])
     pb2 = p2["p_btts"] if btts_si else (1.0 - p2["p_btts"])
-    pm_btts = pm["p_btts"] if btts_si else (1.0 - pm["p_btts"])
+    pm_btts_fb = pm["p_btts"] if btts_si else (1.0 - pm["p_btts"])
+    pm_btts = _devig2(cc.get("btts_si"), cc.get("btts_no"), pm_btts_fb) if btts_si else _devig2(cc.get("btts_no"), cc.get("btts_si"), pm_btts_fb)
     prob_btts = _shrink(min(pb1, pb2), pm_btts)
     k_btts = "btts_si" if btts_si else "btts_no"
     cuota_btts = cc.get(k_btts) or round(max(1.20, 1 / min(0.86, max(0.20, pm_btts) * vig_m)), 2)
