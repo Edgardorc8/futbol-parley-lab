@@ -11,6 +11,7 @@ import uvicorn
 from fastapi import Body, FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse
 
+import diagnostico as D
 import fuentes as F
 import historial as H
 import main as P
@@ -89,6 +90,11 @@ def api_patch_ticket(tid: int, datos: dict = Body(...)):
 def api_del_ticket(tid: int):
     H.borrar_ticket(tid)
     return dict(ok=True)
+
+
+@app.get("/api/diagnostico")
+def api_diagnostico(fecha: str = None):
+    return D.generar_diagnostico(_fecha(fecha))
 
 
 @app.get("/api/excel")
