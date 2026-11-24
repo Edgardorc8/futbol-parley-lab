@@ -192,17 +192,10 @@ def evaluar_partido(g, proy, cc, n_muestra=10):
         return round(p_real * cuota - 1.0, 4)
 
     def _devig2(o_a, o_b, fallback):
+        """Devigging proporcional 2-way exacto: P_a = (1/O_a) / (1/O_a + 1/O_b) -> suma 100%."""
         if o_a and o_b and o_a > 1.0 and o_b > 1.0:
             ia, ib = 1.0 / o_a, 1.0 / o_b
-            lo, hi = 1.0, 3.0
-            for _ in range(30):
-                mid = (lo + hi) / 2
-                if (ia ** mid + ib ** mid) > 1.0:
-                    lo = mid
-                else:
-                    hi = mid
-            k = (lo + hi) / 2
-            return round(ia ** k, 4)
+            return round(ia / (ia + ib), 4)
         return fallback
 
     sel = []
@@ -333,6 +326,8 @@ def evaluar_partido(g, proy, cc, n_muestra=10):
 
 
 def estado_sel(tipo, linea, cuota, cuota_est=False, disc=None, ventaja=None, edge_pp=None):
+    if cuota_est:
+        return "BLOQUEADO_SIN_CUOTA_REAL"
     if tipo == "over" and linea <= LOW_LINE:
         return f"BLOQUEADO LÍNEA BAJA (≤{LOW_LINE} goles)"
     if cuota < ODDS_MIN or cuota > ODDS_MAX:
