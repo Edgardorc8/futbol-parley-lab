@@ -258,11 +258,11 @@
         }).join("")}</tbody></table>` : `<p class="mut">${menu.mensaje_fijas || "Sin fijas +EV hoy. Prueba <b>📅 Mañana</b>."}</p>`}
       </div>`;
 
-      // Partidos horizontales con checkboxes para armador manual
+      // Partidos horizontales con TODOS los mercados visibles (incluye Over 2.5, Under 3.5, AH +1.5)
       const prox = listaP.filter(a => !jugado(a.g));
       const filasPartidos = prox.map(a => {
         const g = a.g, p = a.proy;
-        const sels = a.sel.filter(s => !MERCADOS_DESACTIVADOS.has(s.tipo));
+        const sels = a.sel;
         return `<div class="match-row">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;flex-wrap:wrap;gap:6px">
             <div>${LIGA_ICON[g.liga]} ${mLogo(g)}</div>
